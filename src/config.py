@@ -133,13 +133,46 @@ class IngestionConfig(BaseModel):
 
 
 class PreprocessingConfig(BaseModel):
-    """SAR preprocessing (step 2.x)."""
+    """SAR preprocessing (step 2.x).
+
+    Tile size and overlap deliberately live on :class:`DetectionConfig`: tiles
+    exist to feed the segmentation model, so the model's config owns them.
+    """
 
     target_resolution_m: float = Field(default=40.0, gt=0)
-    speckle_filter: str = "lee"
-    speckle_filter_size: int = Field(default=7, gt=0)
     calibrate_to: str = "sigma0"
     output_crs: str = "EPSG:4326"
+
+    # None means "decide from the pixel values" (dB data is signed and small).
+    input_is_db: Optional[bool] = None
+    calibration_constant_db: float = 0.0
+    number_of_looks: float = Field(default=4.4, gt=0)
+
+    speckle_filter: str = "lee"
+    speckle_filter_size: int = Field(default=7, gt=0)
+
+    coastline_path: Path = Path("configs/coastline/ne_10m_land_aoi.geojson")
+    coastline_url: str = (
+        "https://naciscdn.org/naturalearth/10m/physical/ne_10m_land.zip"
+    )
+    land_buffer_m: float = Field(default=500.0, ge=0.0)
+    nodata: float = float("nan")
+    tile_min_valid_fraction: float = Field(default=0.1, ge=0.0, le=1.0)
+
+    @field_validator("speckle_filter")
+    @classmethod
+    def _known_filter(cls, v: str) -> str:
+        allowed = {"lee", "refined_lee", "none"}
+        if v.lower() not in allowed:
+            raise ValueError(f"speckle_filter must be one of {sorted(allowed)}")
+        return v.lower()
+
+    @field_validator("speckle_filter_size")
+    @classmethod
+    def _odd_window(cls, v: int) -> int:
+        if v % 2 == 0:
+            raise ValueError("speckle_filter_size must be odd so the window has a centre")
+        return v
 
 
 class DetectionConfig(BaseModel):

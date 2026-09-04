@@ -23,6 +23,9 @@ uvicorn
 pydantic
 pydantic-settings
 
+# --- parquet (tile index) ---
+pyarrow
+
 # --- config / testing ---
 PyYAML
 pytest

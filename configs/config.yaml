@@ -36,12 +36,22 @@ ingestion:
   search_lookback_days: 3
 
 # --- SAR preprocessing (step 2.x) ---
+# Tile size and overlap are NOT here: tiles exist to feed the segmentation
+# model, so detection.tile_size / detection.tile_overlap own those numbers.
 preprocessing:
   target_resolution_m: 40.0
-  speckle_filter: lee
-  speckle_filter_size: 7
   calibrate_to: sigma0
   output_crs: EPSG:4326
+  input_is_db: null              # null = detect from the pixel values
+  calibration_constant_db: 0.0   # fallback when a product has no sigma0 LUT
+  number_of_looks: 4.4           # Sentinel-1 IW GRDH ENL, drives Lee weighting
+  speckle_filter: lee            # lee | refined_lee | none
+  speckle_filter_size: 7
+  coastline_path: configs/coastline/ne_10m_land_aoi.geojson
+  coastline_url: https://naciscdn.org/naturalearth/10m/physical/ne_10m_land.zip
+  land_buffer_m: 500.0           # push the coastline seaward, coast is noisy
+  nodata: .nan
+  tile_min_valid_fraction: 0.1   # drop tiles that are mostly land or nodata
 
 # --- spill segmentation + look-alike rejection (step 3.x) ---
 detection:
