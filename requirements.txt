@@ -34,3 +34,6 @@ folium
 # transitive pin: albucore pulls stringzilla, and 4.x/5.x ship no Windows
 # cp311 wheel (would need MSVC build tools). 3.x has one.
 stringzilla<4
+
+# --- http (catalogue client) ---
+requests
