@@ -1,0 +1,29 @@
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# --- secrets ---
+.env
+
+# --- data + model weights (keep dir structure only) ---
+data/raw/*
+data/processed/*
+data/ais/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/ais/.gitkeep
+
+models/*
+!models/.gitkeep
+
+# --- notebooks ---
+.ipynb_checkpoints/
+
+# --- os / editor ---
+.DS_Store
+.idea/
+.vscode/

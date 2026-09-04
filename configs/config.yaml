@@ -1,0 +1,93 @@
+# sar-oilspill configuration
+#
+# Every value here can be overridden by an environment variable using the
+# prefix SAROIL_ and "__" between nesting levels, e.g.:
+#   SAROIL_DETECTION__PROB_THRESHOLD=0.65
+#   SAROIL_PATHS__RAW_DIR=/mnt/bigdisk/raw
+# Secrets are NEVER stored here - only the *names* of the env vars that hold
+# them (see the credentials block and .env.example).
+
+project_name: sar-oilspill
+
+# --- area of interest + on-disk data layout (paths are relative to repo root) ---
+paths:
+  aoi_geojson: configs/aoi.geojson
+  data_dir: data
+  raw_dir: data/raw
+  processed_dir: data/processed
+  ais_dir: data/ais
+  models_dir: models
+
+# --- names of the env vars holding each credential (values live in .env) ---
+credentials:
+  cdse_client_id_env: CDSE_CLIENT_ID
+  cdse_client_secret_env: CDSE_CLIENT_SECRET
+  cds_api_key_env: CDS_API_KEY
+  cmems_username_env: CMEMS_USERNAME
+  cmems_password_env: CMEMS_PASSWORD
+
+# --- satellite product search (step 1.x) ---
+ingestion:
+  collection: SENTINEL-1
+  product_type: GRD
+  sensor_mode: IW
+  polarisation: VV
+  max_products_per_query: 10
+  search_lookback_days: 3
+
+# --- SAR preprocessing (step 2.x) ---
+preprocessing:
+  target_resolution_m: 40.0
+  speckle_filter: lee
+  speckle_filter_size: 7
+  calibrate_to: sigma0
+  output_crs: EPSG:4326
+
+# --- spill segmentation + look-alike rejection (step 3.x) ---
+detection:
+  model_arch: unet
+  encoder: resnet34
+  tile_size: 512
+  tile_overlap: 64
+  prob_threshold: 0.5              # sigmoid cutoff for spill mask
+  min_spill_area_km2: 0.05         # drop specks below this
+  dark_patch_max_sigma0_db: -22.0  # dark = candidate slick
+  lookalike_min_contrast_db: 3.0   # slick vs surrounding sea contrast
+  lookalike_min_wind_speed_ms: 3.0 # too calm -> low-wind look-alike
+  lookalike_max_wind_speed_ms: 12.0 # too rough -> slick not visible
+
+# --- characterization (step 3.x) ---
+characterization:
+  thickness_classes: [sheen, rainbow, thick]
+  volume_estimate_thickness_um: 1.0
+
+# --- alerting (step 4.x) ---
+alerts:
+  min_confidence: 0.6              # below this -> no alert raised
+  min_area_km2: 0.1
+  severity_area_km2:               # lower bound of each severity band
+    low: 0.1
+    medium: 5.0
+    high: 20.0
+    critical: 100.0
+  coastline_proximity_km: 25.0     # escalate if slick this close to shore
+
+# --- AIS retrieval + vessel attribution (step 5.x) ---
+ais:
+  search_window_hours: 6           # +/- around SAR acquisition time
+  search_radius_km: 25.0
+  min_track_points: 3
+  max_candidate_vessels: 50
+  attribution_score_threshold: 0.5
+
+# --- drift prediction (step 5.x) ---
+drift:
+  forecast_hours: 48
+  timestep_minutes: 30
+  wind_drift_factor: 0.03          # % of wind speed added to surface current
+  n_particles: 1000
+
+# --- dashboard / api ---
+api:
+  host: 127.0.0.1
+  port: 8000

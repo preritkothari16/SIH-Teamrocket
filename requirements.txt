@@ -1,0 +1,36 @@
+# --- geospatial / raster ---
+rasterio
+numpy
+scipy
+shapely
+geopandas
+pyproj
+
+# --- deep learning / segmentation ---
+torch
+segmentation-models-pytorch
+albumentations
+
+# --- tabular / trajectory / gridded data ---
+pandas
+movingpandas
+xarray
+netCDF4
+
+# --- api ---
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+
+# --- config / testing ---
+PyYAML
+pytest
+
+# --- visualization ---
+matplotlib
+folium
+
+# transitive pin: albucore pulls stringzilla, and 4.x/5.x ship no Windows
+# cp311 wheel (would need MSVC build tools). 3.x has one.
+stringzilla<4
