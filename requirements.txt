@@ -40,3 +40,6 @@ stringzilla<4
 
 # --- http (catalogue client) ---
 requests
+
+# --- image io (detection dataset) ---
+Pillow

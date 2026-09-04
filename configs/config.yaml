@@ -66,6 +66,31 @@ detection:
   lookalike_min_wind_speed_ms: 3.0 # too calm -> low-wind look-alike
   lookalike_max_wind_speed_ms: 12.0 # too rough -> slick not visible
 
+# --- segmentation training (step 3.1) ---
+# The MKLab / Krestenitis oil-spill dataset uses a 5-class scheme; the order
+# here IS the label index order, so do not reorder it.
+training:
+  dataset_dir: data/raw/mklab
+  num_classes: 5
+  class_names: [sea, oil_spill, look_alike, ship, land]
+  in_channels: 3
+  encoder_weights: imagenet     # null to train from scratch / stay offline
+  image_size: 512
+  batch_size: 8
+  epochs: 40
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  val_split: 0.15
+  num_workers: 0                # >0 needs the __main__ guard on Windows
+  seed: 42
+  loss: dice_ce                 # dice_ce | ce
+  dice_weight: 0.5
+  class_weights: null           # null = inverse frequency from the train split
+  max_class_weight: 50.0
+  amp: true                     # only takes effect on CUDA
+  checkpoint_metric: oil_spill  # class whose IoU selects the best checkpoint
+  early_stopping_patience: 10
+
 # --- characterization (step 3.x) ---
 characterization:
   thickness_classes: [sheen, rainbow, thick]

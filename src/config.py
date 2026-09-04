@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -211,6 +211,67 @@ class DetectionConfig(BaseModel):
         return v
 
 
+class TrainingConfig(BaseModel):
+    """Segmentation training (step 3.1).
+
+    ``class_names`` doubles as the label-index order for the MKLab /
+    Krestenitis 5-class scheme, so reordering it silently relabels the data.
+    """
+
+    dataset_dir: Path = Path("data/raw/mklab")
+    num_classes: int = Field(default=5, gt=1)
+    class_names: List[str] = Field(
+        default_factory=lambda: ["sea", "oil_spill", "look_alike", "ship", "land"]
+    )
+    in_channels: int = Field(default=3, gt=0)
+    encoder_weights: Optional[str] = "imagenet"
+
+    image_size: int = Field(default=512, gt=0)
+    batch_size: int = Field(default=8, gt=0)
+    epochs: int = Field(default=40, gt=0)
+    learning_rate: float = Field(default=3e-4, gt=0)
+    weight_decay: float = Field(default=1e-4, ge=0)
+    val_split: float = Field(default=0.15, gt=0, lt=1)
+    num_workers: int = Field(default=0, ge=0)
+    seed: int = 42
+
+    loss: str = "dice_ce"
+    dice_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    class_weights: Optional[List[float]] = None
+    max_class_weight: float = Field(default=50.0, gt=0)
+
+    amp: bool = True
+    checkpoint_metric: str = "oil_spill"
+    early_stopping_patience: int = Field(default=10, gt=0)
+
+    @field_validator("loss")
+    @classmethod
+    def _known_loss(cls, v: str) -> str:
+        allowed = {"dice_ce", "ce"}
+        if v.lower() not in allowed:
+            raise ValueError(f"loss must be one of {sorted(allowed)}")
+        return v.lower()
+
+    @model_validator(mode="after")
+    def _names_match_classes(self) -> "TrainingConfig":
+        if len(self.class_names) != self.num_classes:
+            raise ValueError(
+                f"class_names has {len(self.class_names)} entries but "
+                f"num_classes is {self.num_classes}"
+            )
+        if self.checkpoint_metric not in self.class_names:
+            raise ValueError(
+                f"checkpoint_metric {self.checkpoint_metric!r} is not one of "
+                f"class_names {self.class_names}"
+            )
+        if self.class_weights is not None and len(self.class_weights) != self.num_classes:
+            raise ValueError(
+                f"class_weights must have {self.num_classes} entries, "
+                f"got {len(self.class_weights)}"
+            )
+        return self
+
+
 class CharacterizationConfig(BaseModel):
     """Slick area / thickness / volume estimation (step 3.x)."""
 
@@ -293,6 +354,7 @@ class Settings(BaseSettings):
     ingestion: IngestionConfig = Field(default_factory=IngestionConfig)
     preprocessing: PreprocessingConfig = Field(default_factory=PreprocessingConfig)
     detection: DetectionConfig = Field(default_factory=DetectionConfig)
+    training: TrainingConfig = Field(default_factory=TrainingConfig)
     characterization: CharacterizationConfig = Field(
         default_factory=CharacterizationConfig
     )
@@ -363,6 +425,7 @@ __all__ = [
     "IngestionConfig",
     "PreprocessingConfig",
     "DetectionConfig",
+    "TrainingConfig",
     "CharacterizationConfig",
     "AlertsConfig",
     "AISConfig",
