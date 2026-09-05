@@ -10,13 +10,21 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 
 | Step | Module | State |
 |---|---|---|
-| 1.x ingestion | `src/ingestion/` | **done** — CDSE catalogue + local disk source |
-| 2.x preprocessing | `src/preprocessing/pipeline.py` | **done** — calibrate → despeckle → geocode → mask land → tile |
-| 3.1 training | `src/detection/{dataset,model,train}.py` | **done, never trained** — no GPU, no dataset here |
-| 3.2 inference | `src/detection/infer.py` | not built — next |
-| 3.3+ | look-alike filter, characterization, alerts, AIS, attribution, drift, dashboard | not built |
+| 1.1 ingestion | `src/ingestion/` | **done** — CDSE catalogue + local disk source |
+| 1.2 preprocessing | `src/preprocessing/pipeline.py` | **done** — calibrate → despeckle → geocode → mask land → tile |
+| 1.3 training | `src/detection/{dataset,model,train}.py` | **done, never trained** — no GPU, no dataset here |
+| 1.4 inference + stitching | `src/detection/infer.py` | **done** — overlaps averaged, not trimmed |
+| 1.5 look-alike filter | `src/detection/lookalike_filter.py` | **done** — contrast / elongation / edge rules |
+| 1.6 characterization | `src/characterization/spill_object.py` | **done** — equal-area polygons → GeoJSON |
+| Phase 1 chain | `scripts/run_detection.py` | **done** — 1.1→1.6 for one scene |
+| Phase 2 | alerts, env data, AIS, attribution, drift, dashboard | not built — next |
 
-`pytest` → 147 passing, ~7s, fully offline. Run it before believing anything here.
+`pytest` → 225 passing, ~19s, fully offline. Run it before believing anything here.
+
+Phase 1 runs end to end: `scripts/run_detection.py --scene <tif> --stub-model`
+takes ~72 s on a 2048² scene. **There is still no trained checkpoint**, so
+`--stub-model` (a dark-pixel threshold, not a detector) is the only way to run
+the chain today; it labels its own output as such.
 
 ## Environment facts
 
@@ -56,6 +64,17 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 - **Class imbalance is handled explicitly**: inverse-frequency weights from the
   real training split + Dice alongside CE. Best checkpoint selects on **oil
   IoU**, not mean IoU. Oil-vs-look-alike is the whole problem.
+- **Tile overlaps are averaged when stitching, not trimmed.** Trimming discards
+  the boundary-straddling slick that the overlap exists to catch.
+- **Uncovered pixels are `NODATA_CLASS` (255), never sea.** A dropped tile must
+  not read as clean water.
+- **Areas are computed in a per-feature Lambert azimuthal equal-area CRS.**
+  Never in degrees — a square degree is ~12,300 km² and shrinks with latitude.
+- **Blob measurements run inside each blob's bounding window.** Measuring in
+  place dilated the full scene once per blob: >600 s vs 72 s for one scene.
+- **Inference maps dB onto the 0-255 range the model trained on** using
+  `detection.input_db_min/max`. That mapping is an assumption, not a
+  calibration — revisit once a checkpoint is trained on real tiles.
 
 ## Conventions
 
@@ -70,7 +89,8 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest                      # 147 tests, offline
+.venv/Scripts/python.exe -m pytest                      # 225 tests, offline
+.venv/Scripts/python.exe scripts/run_detection.py --scene <tif> --stub-model
 .venv/Scripts/python.exe -m src.detection.train --smoke-test   # end-to-end, no data/GPU
 ```
 

@@ -192,12 +192,32 @@ class DetectionConfig(BaseModel):
     lookalike_min_wind_speed_ms: float = Field(default=3.0, ge=0.0)
     lookalike_max_wind_speed_ms: float = Field(default=12.0, ge=0.0)
 
+    # inference (step 1.4)
+    checkpoint_path: Path = Path("models/best.pt")
+    batch_size: int = Field(default=8, gt=0)
+    input_db_min: float = -35.0
+    input_db_max: float = 0.0
+
+    # look-alike rejection (step 1.5)
+    min_blob_pixels: int = Field(default=50, gt=0)
+    lookalike_min_elongation: float = Field(default=1.8, ge=1.0)
+    lookalike_min_edge_gradient: float = Field(default=0.5, ge=0.0)
+    lookalike_ring_pixels: int = Field(default=15, gt=0)
+
     @field_validator("tile_overlap")
     @classmethod
     def _overlap_fits_tile(cls, v: int, info: Any) -> int:
         tile = info.data.get("tile_size")
         if tile is not None and v >= tile:
             raise ValueError("tile_overlap must be smaller than tile_size")
+        return v
+
+    @field_validator("input_db_max")
+    @classmethod
+    def _db_window_ordered(cls, v: float, info: Any) -> float:
+        low = info.data.get("input_db_min")
+        if low is not None and v <= low:
+            raise ValueError("input_db_max must exceed input_db_min")
         return v
 
     @field_validator("lookalike_max_wind_speed_ms")
@@ -279,6 +299,9 @@ class CharacterizationConfig(BaseModel):
         default_factory=lambda: ["sheen", "rainbow", "thick"]
     )
     volume_estimate_thickness_um: float = Field(default=1.0, gt=0)
+    simplify_tolerance_m: float = Field(default=30.0, ge=0.0)
+    min_polygon_area_km2: float = Field(default=0.01, ge=0.0)
+    spills_dirname: str = "spills"
 
 
 class AlertsConfig(BaseModel):

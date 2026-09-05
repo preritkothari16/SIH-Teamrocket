@@ -65,6 +65,16 @@ detection:
   lookalike_min_contrast_db: 3.0   # slick vs surrounding sea contrast
   lookalike_min_wind_speed_ms: 3.0 # too calm -> low-wind look-alike
   lookalike_max_wind_speed_ms: 12.0 # too rough -> slick not visible
+  # --- inference (step 1.4) ---
+  checkpoint_path: models/best.pt
+  batch_size: 8
+  input_db_min: -35.0            # dB window mapped onto the 0-255 the model saw
+  input_db_max: 0.0
+  # --- look-alike rejection (step 1.5) ---
+  min_blob_pixels: 50            # below this a blob is speckle, not a slick
+  lookalike_min_elongation: 1.8  # slicks drift into streaks; look-alikes are blobby
+  lookalike_min_edge_gradient: 0.5  # dB per pixel across the blob boundary
+  lookalike_ring_pixels: 15      # width of the surrounding ring used for contrast
 
 # --- segmentation training (step 3.1) ---
 # The MKLab / Krestenitis oil-spill dataset uses a 5-class scheme; the order
@@ -95,6 +105,9 @@ training:
 characterization:
   thickness_classes: [sheen, rainbow, thick]
   volume_estimate_thickness_um: 1.0
+  simplify_tolerance_m: 30.0     # polygon simplification, ~ one preprocessed pixel
+  min_polygon_area_km2: 0.01     # drop slivers left by the mask edges
+  spills_dirname: spills         # under data/processed/
 
 # --- alerting (step 4.x) ---
 alerts:
