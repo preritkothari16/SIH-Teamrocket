@@ -20,18 +20,23 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from affine import Affine
 from pyproj import CRS as ProjCRS
 from pyproj import Transformer
 from rasterio.features import shapes as raster_shapes
+from rasterio.windows import Window
+from rasterio.windows import transform as window_transform
 from shapely.geometry import MultiPolygon, Polygon, mapping, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform as shapely_transform
 
 from src.config import Settings, get_settings
+
+if TYPE_CHECKING:  # pragma: no cover - typing only, no runtime dependency
+    from src.detection.lookalike_filter import FilterResult
 
 logger = logging.getLogger(__name__)
 
@@ -289,6 +294,55 @@ def spills_from_mask(
     return features
 
 
+def spills_from_blobs(
+    filter_result: "FilterResult",
+    transform: Affine,
+    scene_id: str,
+    acquisition_timestamp: Optional[datetime] = None,
+    crs: str = WGS84,
+    settings: Optional[Settings] = None,
+) -> List[Dict[str, Any]]:
+    """Vectorise each look-alike-filter survivor into its own spill.
+
+    Unlike :func:`spills_from_mask`, which only ever sees the flattened union
+    of surviving pixels, this reads the filter's own blob measurements - in
+    particular ``BlobVerdict.mean_confidence``, already averaged over exactly
+    that blob's pixels - so two spills in the same scene keep their own
+    confidence instead of both reporting the mean over every oil pixel in the
+    scene combined.
+
+    Vectorisation happens inside each blob's own bounding window, not the full
+    scene, for the same reason blob measurement does in
+    :mod:`src.detection.lookalike_filter`: a full-scene op repeated once per
+    blob is minutes of work on a real scene instead of seconds.
+    """
+    settings = settings or get_settings()
+    features: List[Dict[str, Any]] = []
+
+    for blob in filter_result.kept:
+        row_min, col_min, row_max, col_max = blob.bbox
+        window = Window(col_min, row_min, col_max - col_min + 1, row_max - row_min + 1)
+        submask = (
+            filter_result.labels[row_min : row_max + 1, col_min : col_max + 1]
+            == blob.blob_id
+        )
+        submask_transform = window_transform(window, transform)
+
+        for polygon in mask_to_polygon(submask, submask_transform, crs=crs, settings=settings):
+            features.append(
+                build_spill_object(
+                    polygon,
+                    scene_id=scene_id,
+                    acquisition_timestamp=acquisition_timestamp,
+                    spill_id=f"{scene_id}_spill_{len(features) + 1:03d}",
+                    confidence=blob.mean_confidence,
+                    crs=crs,
+                    settings=settings,
+                )
+            )
+    return features
+
+
 def _mean_confidence(
     confidence: Optional[np.ndarray], mask: np.ndarray
 ) -> Optional[float]:
@@ -335,6 +389,7 @@ __all__ = [
     "mask_to_polygon",
     "build_spill_object",
     "spills_from_mask",
+    "spills_from_blobs",
     "feature_collection",
     "area_km2",
     "perimeter_km",

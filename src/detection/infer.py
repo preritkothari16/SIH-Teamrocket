@@ -286,6 +286,43 @@ def mask_from_probabilities(
     return np.where(coverage > 0, mask, np.uint8(NODATA_CLASS)).astype(np.uint8)
 
 
+def stitch_backscatter(
+    scene_dir: Path,
+    frame: Optional[pd.DataFrame] = None,
+    grid: Optional[SceneGrid] = None,
+) -> np.ndarray:
+    """Reconstruct the scene's preprocessed backscatter on the mask's own grid.
+
+    Reads the same despeckled, geocoded, land-masked tiles the model saw and
+    averages overlaps exactly like :func:`stitch_tiles` does for class
+    probabilities, so whatever consumes this (the look-alike filter) measures
+    blobs against backscatter that is pixel-for-pixel aligned with the
+    stitched mask - never a fresh, ungeocoded read of the raw scene, which
+    would silently misalign the two the moment geocoding actually reprojects.
+
+    Pass ``grid`` (e.g. ``InferenceResult.grid``) to guarantee the result
+    shares the exact transform/CRS/shape the mask was built on rather than one
+    independently rebuilt from the tile index.
+
+    Uncovered pixels - no tile reached them, or every tile that did was
+    entirely land/nodata there - come back as NaN, not zero: a fabricated 0 dB
+    fill would let land silently pollute the look-alike filter's contrast ring
+    around a coastal blob.
+    """
+    scene_dir = Path(scene_dir)
+    if frame is None:
+        frame = load_tile_index(scene_dir)
+    if grid is None:
+        grid = scene_grid_from_index(frame)
+
+    paths = tile_paths(frame, scene_dir)
+    tiles = [read_tile(path) for path in paths]
+    valid_masks = [tile_valid_mask(t) for t in tiles]
+
+    stitched, coverage = stitch_tiles(tiles, frame, grid, valid_masks)
+    return np.where(coverage > 0, stitched, np.float32(np.nan)).astype(np.float32)
+
+
 # --------------------------------------------------------------------------- #
 # the whole scene
 # --------------------------------------------------------------------------- #
@@ -489,6 +526,7 @@ __all__ = [
     "tile_valid_mask",
     "predict_tiles",
     "stitch_tiles",
+    "stitch_backscatter",
     "mask_from_probabilities",
     "save_mask",
     "save_confidence",

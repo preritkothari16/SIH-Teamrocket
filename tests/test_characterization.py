@@ -24,9 +24,13 @@ from src.characterization.spill_object import (
     mask_to_polygon,
     orientation_and_elongation,
     perimeter_km,
+    spills_from_blobs,
     spills_from_mask,
     to_equal_area,
 )
+from src.config import load_settings
+from src.detection.dataset import OIL_CLASS
+from src.detection.lookalike_filter import filter_lookalikes
 
 SCENE_ID = "test_scene"
 ACQUIRED = datetime(2023, 5, 14, 0, 33, 32, tzinfo=timezone.utc)
@@ -297,6 +301,100 @@ def test_spills_from_mask_averages_the_confidence() -> None:
     features = spills_from_mask(mask, scene_transform(), SCENE_ID, ACQUIRED,
                                 confidence=confidence)
     assert features[0]["properties"]["mean_confidence"] == pytest.approx(0.8, abs=0.01)
+
+
+def _painted_oil_streak(shape, centre, semi_major=40.0, semi_minor=6.0, angle_deg=0.0):
+    """A long, thin, hard-edged dark streak - shaped so it clears every
+    look-alike-filter test (contrast, elongation, edge gradient) on its own.
+    """
+    rows, cols = np.ogrid[: shape[0], : shape[1]]
+    dr = rows - centre[0]
+    dc = cols - centre[1]
+    theta = np.radians(angle_deg)
+    major = dc * np.cos(theta) + dr * np.sin(theta)
+    minor = -dc * np.sin(theta) + dr * np.cos(theta)
+    return (major / semi_major) ** 2 + (minor / semi_minor) ** 2 <= 1.0
+
+
+def test_spills_from_blobs_keeps_each_blobs_own_confidence() -> None:
+    """The regression case: two spills in one scene must not collapse onto the
+    same (wrongly re-averaged) confidence value.
+
+    Both blobs are painted identically so they both clear the look-alike
+    filter, and differ only in the confidence the (stand-in) model reported
+    for each - which is exactly the case ``spills_from_mask``'s whole-mask
+    average could not tell apart.
+    """
+    shape = (220, 220)
+    sea_db = -10.0
+    rng = np.random.default_rng(0)
+    image = (sea_db + rng.normal(0.0, 0.2, size=shape)).astype(np.float32)
+    mask = np.zeros(shape, dtype=np.uint8)
+
+    blob_a = _painted_oil_streak(shape, (50, 60))
+    blob_b = _painted_oil_streak(shape, (160, 150))
+    image[blob_a] = sea_db - 9.0
+    image[blob_b] = sea_db - 9.0
+    mask[blob_a] = OIL_CLASS
+    mask[blob_b] = OIL_CLASS
+
+    confidence = np.full(shape, 0.3, dtype=np.float32)
+    confidence[blob_a] = 0.95
+    confidence[blob_b] = 0.55
+
+    settings = load_settings()
+    result = filter_lookalikes(mask, image, confidence=confidence, settings=settings)
+    assert len(result.kept) == 2, "both painted streaks must pass the filter"
+
+    features = spills_from_blobs(result, scene_transform(), SCENE_ID, ACQUIRED)
+
+    assert len(features) == 2
+    confidences = {round(f["properties"]["mean_confidence"], 2) for f in features}
+    assert confidences == {0.95, 0.55}, (
+        "each spill must carry its own blob's confidence, not the scene-wide average"
+    )
+    # sanity: this is not a coincidence of averaging over the whole mask
+    whole_mask_average = float(confidence[mask == OIL_CLASS].mean())
+    assert 0.55 < whole_mask_average < 0.95
+
+
+def test_spills_from_blobs_matches_single_blob_behaviour_of_spills_from_mask() -> None:
+    """A single-blob scene must still get the correct confidence either way."""
+    shape = (160, 160)
+    sea_db = -10.0
+    image = np.full(shape, sea_db, dtype=np.float32)
+    mask = np.zeros(shape, dtype=np.uint8)
+
+    blob = _painted_oil_streak(shape, (80, 80))
+    image[blob] = sea_db - 9.0
+    mask[blob] = OIL_CLASS
+
+    confidence = np.full(shape, 0.3, dtype=np.float32)
+    confidence[blob] = 0.8
+
+    settings = load_settings()
+    result = filter_lookalikes(mask, image, confidence=confidence, settings=settings)
+    assert len(result.kept) == 1
+
+    from_blobs = spills_from_blobs(result, scene_transform(), SCENE_ID, ACQUIRED)
+    from_mask = spills_from_mask(
+        result.mask, scene_transform(), SCENE_ID, ACQUIRED, confidence=confidence
+    )
+
+    assert len(from_blobs) == len(from_mask) == 1
+    assert from_blobs[0]["properties"]["mean_confidence"] == pytest.approx(
+        from_mask[0]["properties"]["mean_confidence"], abs=0.01
+    )
+    assert from_blobs[0]["properties"]["mean_confidence"] == pytest.approx(0.8, abs=0.01)
+
+
+def test_spills_from_blobs_on_a_clean_scene_yields_nothing() -> None:
+    settings = load_settings()
+    result = filter_lookalikes(
+        np.zeros((60, 60), dtype=np.uint8), np.full((60, 60), -10.0, dtype=np.float32),
+        settings=settings,
+    )
+    assert spills_from_blobs(result, scene_transform(), SCENE_ID, ACQUIRED) == []
 
 
 def test_a_clean_scene_produces_an_empty_collection() -> None:

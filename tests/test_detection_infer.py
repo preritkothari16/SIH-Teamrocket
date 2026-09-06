@@ -32,6 +32,7 @@ from src.detection.infer import (
     read_tile,
     save_mask,
     scene_grid_from_index,
+    stitch_backscatter,
     stitch_tiles,
     tile_paths,
     tile_valid_mask,
@@ -297,6 +298,119 @@ def test_stitching_handles_edge_tiles_smaller_than_the_tile_size() -> None:
     )
     assert stitched.shape[1:] == (40, 40)
     assert (coverage > 0).all()
+
+
+# --------------------------------------------------------------------------- #
+# stitch_backscatter - the array the look-alike filter measures blobs against
+# --------------------------------------------------------------------------- #
+def write_backscatter_scene_dir(
+    tmp_path: Path, frame: pd.DataFrame, fills: List[float]
+) -> Path:
+    """Like write_scene_dir, but each tile gets its own fill value.
+
+    Stands in for the despeckled/geocoded/land-masked tiles run_pipeline
+    writes: each tile's own dB level here plays the same role a real slick or
+    real land NaN would.
+    """
+    scene_dir = tmp_path / "synthetic_backscatter"
+    scene_dir.mkdir(parents=True, exist_ok=True)
+
+    paths = []
+    for (_, row), fill in zip(frame.iterrows(), fills):
+        path = scene_dir / f"{row['tile_id']}.tif"
+        transform = Affine.from_gdal(
+            row["gt_origin_x"], row["gt_pixel_width"], row["gt_row_rotation"],
+            row["gt_origin_y"], row["gt_col_rotation"], row["gt_pixel_height"],
+        )
+        with rasterio.open(
+            path, "w", driver="GTiff", height=int(row["height"]),
+            width=int(row["width"]), count=2, dtype="float32",
+            crs=CRS.from_epsg(4326), transform=transform, nodata=float("nan"),
+        ) as dst:
+            dst.write(
+                np.full((2, int(row["height"]), int(row["width"])), fill, dtype=np.float32)
+            )
+        paths.append(str(path))
+
+    frame = frame.copy()
+    frame["path"] = paths
+    frame.to_parquet(scene_dir / "tile_index.parquet", index=False)
+    return scene_dir
+
+
+def test_stitch_backscatter_places_each_tiles_value_in_its_quadrant(
+    tmp_path: Path, index_2x2: pd.DataFrame, grid_2x2: SceneGrid
+) -> None:
+    fills = [-8.0, -14.0, -20.0, -26.0]
+    scene_dir = write_backscatter_scene_dir(tmp_path, index_2x2, fills)
+    frame = load_tile_index(scene_dir)
+
+    backscatter = stitch_backscatter(scene_dir, frame=frame, grid=grid_2x2)
+
+    assert backscatter.shape == (2, 64, 64)
+    for (_, row), fill in zip(frame.iterrows(), fills):
+        row_off, col_off = int(row["row_off"]), int(row["col_off"])
+        quadrant = backscatter[:, row_off : row_off + 32, col_off : col_off + 32]
+        assert quadrant == pytest.approx(fill)
+
+
+def test_stitch_backscatter_shares_the_grid_infer_scene_produced(
+    tmp_path: Path, index_2x2: pd.DataFrame
+) -> None:
+    """The whole point of the fix: same grid the mask was stitched on."""
+    scene_dir = write_scene_dir(tmp_path, index_2x2, fill=-15.0)
+    result = infer_scene(scene_dir, model=FixedClassModel([1, 1, 1, 1]),
+                         scene_id="synthetic", save=False)
+
+    backscatter = stitch_backscatter(scene_dir, grid=result.grid)
+
+    assert backscatter.shape[1:] == result.mask.shape
+    assert backscatter[0, 10, 10] == pytest.approx(-15.0)
+
+
+def test_stitch_backscatter_marks_uncovered_pixels_as_nan_not_zero(
+    tmp_path: Path, index_2x2: pd.DataFrame, grid_2x2: SceneGrid
+) -> None:
+    """A gap left by a dropped tile must read as missing, not as calm water."""
+    partial = index_2x2.iloc[:3]
+    scene_dir = write_backscatter_scene_dir(tmp_path, partial, [-8.0, -8.0, -8.0])
+    frame = load_tile_index(scene_dir)
+
+    backscatter = stitch_backscatter(scene_dir, frame=frame, grid=grid_2x2)
+
+    missing = index_2x2.iloc[3]
+    row_off, col_off = int(missing["row_off"]), int(missing["col_off"])
+    assert np.isnan(backscatter[:, row_off : row_off + 32, col_off : col_off + 32]).all()
+    assert not np.isnan(backscatter[:, :32, :32]).any()
+
+
+def test_stitch_backscatter_keeps_land_nodata_as_nan_not_zero(
+    tmp_path: Path, index_2x2: pd.DataFrame, grid_2x2: SceneGrid
+) -> None:
+    """Land inside a tile (not just a missing tile) must not resolve to 0 dB.
+
+    A fabricated 0 dB fill where land actually is would let the look-alike
+    filter's contrast ring pick up land backscatter as if it were sea.
+    """
+    fills = [-8.0, -8.0, -8.0, -8.0]
+    scene_dir = write_backscatter_scene_dir(tmp_path, index_2x2, fills)
+    frame = load_tile_index(scene_dir)
+
+    corner = frame.iloc[0]
+    path = Path(corner["path"])
+    with rasterio.open(path) as dataset:
+        profile = dataset.profile
+    data = np.full((2, int(corner["height"]), int(corner["width"])), -8.0, dtype=np.float32)
+    data[:, :16, :] = np.nan  # half the tile is land
+    with rasterio.open(path, "w", **profile) as dst:
+        dst.write(data)
+
+    backscatter = stitch_backscatter(scene_dir, frame=load_tile_index(scene_dir), grid=grid_2x2)
+
+    row_off, col_off = int(corner["row_off"]), int(corner["col_off"])
+    land_region = backscatter[:, row_off : row_off + 16, col_off : col_off + 32]
+    assert np.isnan(land_region).all()
+    assert not (land_region == 0).any()
 
 
 # --------------------------------------------------------------------------- #

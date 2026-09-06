@@ -33,7 +33,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import numpy as np
 import torch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -43,19 +42,19 @@ if str(REPO_ROOT) not in sys.path:  # allow `python scripts/run_detection.py`
 from src.config import Settings, get_settings  # noqa: E402
 from src.characterization.spill_object import (  # noqa: E402
     feature_collection,
-    spills_from_mask,
+    spills_from_blobs,
 )
 from src.detection.dataset import CLASS_NAMES, OIL_CLASS  # noqa: E402
 from src.detection.infer import (  # noqa: E402
     NODATA_CLASS,
-    InferenceResult,
     infer_scene,
     load_model,
+    stitch_backscatter,
 )
 from src.detection.lookalike_filter import filter_lookalikes  # noqa: E402
 from src.ingestion.local_source import LocalSceneSource  # noqa: E402
 from src.ingestion.types import Scene  # noqa: E402
-from src.preprocessing.pipeline import calibrate, run_pipeline  # noqa: E402
+from src.preprocessing.pipeline import run_pipeline  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -112,29 +111,6 @@ def resolve_scene(
     return scenes[0]
 
 
-def scene_backscatter(
-    scene: Scene, result: InferenceResult, settings: Settings
-) -> np.ndarray:
-    """The dB backscatter the look-alike filter measures blobs against.
-
-    Read back from the source scene rather than kept in memory through the
-    pipeline, and cropped or padded to the stitched mask, which can differ by a
-    few pixels when geocoding resampled the grid.
-    """
-    image = calibrate(scene, settings=settings)
-    band = image.data[0]
-
-    height, width = result.mask.shape
-    if band.shape == (height, width):
-        return band
-
-    fitted = np.full((height, width), np.nan, dtype=np.float32)
-    rows = min(height, band.shape[0])
-    cols = min(width, band.shape[1])
-    fitted[:rows, :cols] = band[:rows, :cols]
-    return fitted
-
-
 def run(
     scene_id: Optional[str] = None,
     scene_path: Optional[Path] = None,
@@ -180,18 +156,17 @@ def run(
         f"{result.mask.shape[1]}, {100.0 * result.class_fraction(OIL_CLASS):.2f}% oil"
     )
 
-    backscatter = scene_backscatter(scene, result, settings)
+    backscatter = stitch_backscatter(scene_dir, grid=result.grid)
     filtered = filter_lookalikes(
         result.mask, backscatter, confidence=result.confidence, settings=settings
     )
     print(f"[1.5] {filtered.summary()}")
 
-    features = spills_from_mask(
-        filtered.mask,
+    features = spills_from_blobs(
+        filtered,
         transform=result.grid.transform,
         scene_id=scene.scene_id,
         acquisition_timestamp=scene.acquisition_time,
-        confidence=result.confidence,
         crs=result.grid.crs.to_string() if result.grid.crs else "EPSG:4326",
         settings=settings,
     )
