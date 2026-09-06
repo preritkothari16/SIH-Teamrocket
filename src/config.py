@@ -77,6 +77,8 @@ class PathsConfig(BaseModel):
     raw_dir: Path = Path("data/raw")
     processed_dir: Path = Path("data/processed")
     ais_dir: Path = Path("data/ais")
+    env_dir: Path = Path("data/env")
+    alerts_dir: Path = Path("data/alerts")
     models_dir: Path = Path("models")
 
     def resolve(self, path: Path) -> Path:
@@ -305,9 +307,9 @@ class CharacterizationConfig(BaseModel):
 
 
 class AlertsConfig(BaseModel):
-    """Alert manager gating and severity banding (step 4.x)."""
+    """Alert manager gating, dedup, and severity banding (step 3.2)."""
 
-    min_confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+    min_confidence: float = Field(default=0.7, ge=0.0, le=1.0)
     min_area_km2: float = Field(default=0.1, ge=0.0)
     severity_area_km2: Dict[str, float] = Field(
         default_factory=lambda: {
@@ -319,6 +321,23 @@ class AlertsConfig(BaseModel):
     )
     coastline_proximity_km: float = Field(default=25.0, ge=0.0)
 
+    # A slick is only visible to a dark-patch detector in this wind band -
+    # too calm and low-wind cells look identical, too rough and the slick is
+    # mixed away. Outside it a spill still registers, just as "possible".
+    wind_min_speed_ms: float = Field(default=2.0, ge=0.0)
+    wind_max_speed_ms: float = Field(default=12.0, gt=0.0)
+
+    # Optional GeoJSON Feature/FeatureCollection of known natural seeps or
+    # platforms; a spill centred inside one is rejected outright. None -> no
+    # exclusion zones configured.
+    exclusion_zones_path: Optional[Path] = None
+
+    # Dedup: a later detection within this many days, whose polygon overlaps
+    # or drifts within this many km of an already-registered event, updates
+    # that event instead of minting a new spill ID.
+    dedup_window_days: float = Field(default=3.0, gt=0.0)
+    dedup_buffer_km: float = Field(default=5.0, ge=0.0)
+
     @field_validator("severity_area_km2")
     @classmethod
     def _bands_increase(cls, v: Dict[str, float]) -> Dict[str, float]:
@@ -327,6 +346,14 @@ class AlertsConfig(BaseModel):
             raise ValueError(
                 "severity_area_km2 bands must be listed in increasing area order"
             )
+        return v
+
+    @field_validator("wind_max_speed_ms")
+    @classmethod
+    def _wind_band_ordered(cls, v: float, info: Any) -> float:
+        low = info.data.get("wind_min_speed_ms")
+        if low is not None and v <= low:
+            raise ValueError("wind_max_speed_ms must exceed wind_min_speed_ms")
         return v
 
 
@@ -342,7 +369,6 @@ class AISConfig(BaseModel):
     search_radius_km: float = Field(default=25.0, gt=0)
     interpolation_minutes: float = Field(default=15.0, gt=0)
     min_moving_speed_knots: float = Field(default=0.5, ge=0.0)
-    min_track_points: int = Field(default=3, gt=0)
     max_candidate_vessels: int = Field(default=50, gt=0)
 
 
@@ -375,8 +401,6 @@ class AttributionConfig(BaseModel):
     weight_alignment: float = Field(default=0.35, ge=0.0)
     weight_type: float = Field(default=0.15, ge=0.0)
 
-    score_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-
     @model_validator(mode="after")
     def _weights_sum_to_one(self) -> "AttributionConfig":
         total = (
@@ -386,6 +410,27 @@ class AttributionConfig(BaseModel):
         if abs(total - 1.0) > 1e-6:
             raise ValueError(f"attribution weight_* fields must sum to 1.0, got {total}")
         return self
+
+
+class EnvDataConfig(BaseModel):
+    """Environmental vector fields: wind now (step 3.1), currents later
+    (step 4.1) - see src/env_data/wind.py.
+    """
+
+    # Local/cached NetCDF (ERA5 u10/v10 layout). None -> get_wind() falls back
+    # to fetching via the CDS API if cdsapi is installed and credentials
+    # resolve; otherwise it raises naming what's missing.
+    wind_dataset_path: Optional[Path] = None
+    interpolation_method: str = "linear"  # linear | nearest, spatial lookup
+    cds_area_buffer_deg: float = Field(default=1.0, gt=0)
+
+    @field_validator("interpolation_method")
+    @classmethod
+    def _known_method(cls, v: str) -> str:
+        allowed = {"linear", "nearest"}
+        if v.lower() not in allowed:
+            raise ValueError(f"interpolation_method must be one of {sorted(allowed)}")
+        return v.lower()
 
 
 class DriftConfig(BaseModel):
@@ -432,6 +477,7 @@ class Settings(BaseSettings):
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     ais: AISConfig = Field(default_factory=AISConfig)
     attribution: AttributionConfig = Field(default_factory=AttributionConfig)
+    env_data: EnvDataConfig = Field(default_factory=EnvDataConfig)
     drift: DriftConfig = Field(default_factory=DriftConfig)
     api: APIConfig = Field(default_factory=APIConfig)
 
@@ -502,6 +548,7 @@ __all__ = [
     "AlertsConfig",
     "AISConfig",
     "AttributionConfig",
+    "EnvDataConfig",
     "DriftConfig",
     "APIConfig",
     "config_file_override",

@@ -16,6 +16,8 @@ paths:
   raw_dir: data/raw
   processed_dir: data/processed
   ais_dir: data/ais
+  env_dir: data/env
+  alerts_dir: data/alerts
   models_dir: models
 
 # --- names of the env vars holding each credential (values live in .env) ---
@@ -111,8 +113,8 @@ characterization:
 
 # --- alerting (step 4.x) ---
 alerts:
-  min_confidence: 0.6              # below this -> no alert raised
-  min_area_km2: 0.1
+  min_confidence: 0.7              # below this -> rejected, no alert raised
+  min_area_km2: 0.1                # below this -> rejected, too small to report
   severity_area_km2:               # lower bound of each severity band
     low: 0.1
     medium: 5.0
@@ -120,13 +122,25 @@ alerts:
     critical: 100.0
   coastline_proximity_km: 25.0     # escalate if slick this close to shore
 
+  # detectable wind band: outside it, still register but mark "possible"
+  wind_min_speed_ms: 2.0
+  wind_max_speed_ms: 12.0
+
+  # optional GeoJSON of known natural seeps / platforms; null -> none configured
+  exclusion_zones_path: null
+
+  # dedup: a later detection within this window, overlapping or within this
+  # many km of an already-registered event, updates it instead of creating
+  # a new spill ID
+  dedup_window_days: 3.0
+  dedup_buffer_km: 5.0
+
 # --- AIS retrieval + track reconstruction (step 2.1-2.2) ---
 ais:
   search_window_hours: 48          # look-back only: [acquisition - this, acquisition]
   search_radius_km: 25.0           # spill-bbox buffer for the search, and the CPA cutoff
   interpolation_minutes: 15.0      # cadence used to fill gaps between sparse AIS pings
   min_moving_speed_knots: 0.5      # at/below this for the whole window -> moored, not a suspect
-  min_track_points: 3
   max_candidate_vessels: 50
 
 # --- vessel attribution scoring (step 2.3) ---
@@ -160,7 +174,11 @@ attribution:
   weight_alignment: 0.35
   weight_type: 0.15
 
-  score_threshold: 0.5             # candidates at/above this are a plausible match
+# --- environmental data: wind (step 3.1), currents later (step 4.1) ---
+env_data:
+  wind_dataset_path: null        # local/cached NetCDF (ERA5 u10/v10); null -> CDS API if configured
+  interpolation_method: linear   # linear | nearest, spatial lookup
+  cds_area_buffer_deg: 1.0       # bounding-box half-width around a CDS fetch request
 
 # --- drift prediction (step 5.x) ---
 drift:

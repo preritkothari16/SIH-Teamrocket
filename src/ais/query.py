@@ -31,12 +31,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple, Union
 
 import pandas as pd
+from pyproj import CRS as ProjCRS
 from pyproj import Transformer
 from shapely.geometry import Point, box, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform as shapely_transform
 
-from src.characterization.spill_object import WGS84, equal_area_crs_for
+from src.characterization.spill_object import WGS84, to_equal_area
 from src.config import Settings, get_settings
 
 SpillLike = Union[Dict[str, Any], Tuple[BaseGeometry, Any]]
@@ -55,6 +56,25 @@ def _as_utc(value: Any) -> datetime:
     return ts.to_pydatetime()
 
 
+def _check_wgs84(crs: Optional[str]) -> None:
+    """AIS points are always lon/lat WGS84; a spill recorded in any other CRS
+    would have its coordinates silently misread as degrees they are not.
+
+    A spill with no recorded ``crs`` is assumed WGS84 - that's what every
+    spill Phase 1 actually produces (``preprocessing.output_crs`` defaults to
+    EPSG:4326), and the bare ``(geometry, timestamp)`` tuple form carries no
+    CRS information to check at all.
+    """
+    if crs is None:
+        return
+    if ProjCRS.from_user_input(crs) != ProjCRS.from_user_input(WGS84):
+        raise AISQueryError(
+            f"spill geometry is in {crs!r}, not WGS84 ({WGS84}); AIS points "
+            "are lon/lat WGS84 and cannot be compared against it directly - "
+            "reproject the spill to WGS84 before querying AIS"
+        )
+
+
 def spill_geometry_and_time(spill: SpillLike) -> Tuple[BaseGeometry, datetime]:
     """Pull ``(geometry, acquisition_time)`` out of a spill GeoJSON Feature.
 
@@ -64,8 +84,10 @@ def spill_geometry_and_time(spill: SpillLike) -> Tuple[BaseGeometry, datetime]:
     if isinstance(spill, dict):
         if "geometry" not in spill:
             raise AISQueryError("spill has no 'geometry'")
+        properties = spill.get("properties") or {}
+        _check_wgs84(properties.get("crs"))
         geometry = shape(spill["geometry"])
-        timestamp = (spill.get("properties") or {}).get("acquisition_timestamp")
+        timestamp = properties.get("acquisition_timestamp")
         if timestamp is None:
             raise AISQueryError("spill has no properties.acquisition_timestamp")
         return geometry, _as_utc(timestamp)
@@ -99,13 +121,13 @@ def search_area(
     buffer_km = buffer_km if buffer_km is not None else settings.ais.search_radius_km
 
     bbox = box(*geometry.bounds)
-    equal_area = equal_area_crs_for(bbox)
-    to_equal_area = Transformer.from_crs(source_crs, equal_area, always_xy=True)
-    to_source = Transformer.from_crs(equal_area, source_crs, always_xy=True)
-
-    projected_bbox = shapely_transform(to_equal_area.transform, bbox)
+    projected_bbox, equal_area = to_equal_area(bbox, source_crs)
     buffered = projected_bbox.buffer(buffer_km * 1000.0)
-    return shapely_transform(to_source.transform, buffered)
+
+    # to_equal_area() only goes one way; the buffer has to come back to
+    # source_crs so it can be tested against AIS lon/lat points directly.
+    back_to_source = Transformer.from_crs(equal_area, source_crs, always_xy=True)
+    return shapely_transform(back_to_source.transform, buffered)
 
 
 def query_ais_for_spill(

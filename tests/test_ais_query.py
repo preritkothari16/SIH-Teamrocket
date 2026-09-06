@@ -162,3 +162,29 @@ def test_spill_geometry_and_time_from_a_bare_tuple() -> None:
     geometry, timestamp = spill_geometry_and_time((SPILL_POLYGON, ACQUIRED))
     assert geometry.equals(SPILL_POLYGON)
     assert timestamp == ACQUIRED
+
+
+def test_spill_geometry_and_time_accepts_wgs84_written_as_epsg_4326() -> None:
+    """The default - and the only CRS any spill Phase 1 actually produces."""
+    feature = build_spill_object(SPILL_POLYGON, "scene", ACQUIRED, crs="EPSG:4326")
+    geometry, timestamp = spill_geometry_and_time(feature)
+    assert geometry.equals(SPILL_POLYGON)
+    assert timestamp == ACQUIRED
+
+
+def test_spill_geometry_and_time_accepts_a_spill_with_no_crs_recorded() -> None:
+    feature = build_spill_object(SPILL_POLYGON, "scene", ACQUIRED)
+    del feature["properties"]["crs"]
+    geometry, timestamp = spill_geometry_and_time(feature)
+    assert geometry.equals(SPILL_POLYGON)
+
+
+def test_spill_geometry_and_time_rejects_a_non_wgs84_spill() -> None:
+    """The regression case: a projected spill must never be silently treated
+    as lon/lat degrees - AIS coordinates are WGS84 and would be compared
+    against the wrong numbers entirely.
+    """
+    metric_polygon = box(0.0, 0.0, 2000.0, 3000.0)
+    feature = build_spill_object(metric_polygon, "scene", ACQUIRED, crs="EPSG:32643")
+    with pytest.raises(AISQueryError, match="not WGS84"):
+        spill_geometry_and_time(feature)

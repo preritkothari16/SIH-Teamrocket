@@ -13,9 +13,13 @@ venv/
 data/raw/*
 data/processed/*
 data/ais/*
+data/env/*
+data/alerts/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/ais/.gitkeep
+!data/env/.gitkeep
+!data/alerts/.gitkeep
 
 models/*
 !models/.gitkeep

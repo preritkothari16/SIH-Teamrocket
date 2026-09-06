@@ -22,11 +22,10 @@ import pandas as pd
 from pyproj import Transformer
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import transform as shapely_transform
 
 from src.ais.query import SpillLike, spill_geometry_and_time
 from src.ais.tracks import VesselTrack
-from src.characterization.spill_object import WGS84, equal_area_crs_for
+from src.characterization.spill_object import WGS84, to_equal_area
 from src.config import Settings, get_settings
 
 KNOTS_PER_KMH = 1.0 / 1.852
@@ -51,10 +50,17 @@ class CandidateVessel:
 
 def _project(geometry: BaseGeometry, source_crs: str = WGS84):
     """(project(lon, lat) -> (x, y), projected geometry) in an equal-area CRS
-    centred on ``geometry``, so distances downstream are real metres."""
-    equal_area = equal_area_crs_for(geometry)
+    centred on ``geometry``, so distances downstream are real metres.
+
+    Reuses :func:`to_equal_area` for the CRS choice and the geometry's own
+    projection; the transformer is rebuilt from its resulting CRS (rather than
+    also returned by :func:`to_equal_area`) because callers here need it again
+    afterward, to project extra points (a track's positions) into that same
+    CRS - not just the one geometry.
+    """
+    projected_geometry, equal_area = to_equal_area(geometry, source_crs)
     transformer = Transformer.from_crs(source_crs, equal_area, always_xy=True)
-    return transformer, shapely_transform(transformer.transform, geometry)
+    return transformer, projected_geometry
 
 
 def closest_point_of_approach(
@@ -69,6 +75,19 @@ def closest_point_of_approach(
     equal-area projection centred on the spill, never in raw degrees.
     """
     transformer, projected_geometry = _project(geometry)
+    return _cpa_with_projection(track, transformer, projected_geometry)
+
+
+def _cpa_with_projection(
+    track: VesselTrack, transformer: Transformer, projected_geometry: BaseGeometry
+) -> "tuple[float, datetime]":
+    """The actual CPA computation, given an already-projected spill geometry.
+
+    Split out so :func:`filter_candidates` can build the (spill-geometry,
+    transformer) pair once and reuse it across every candidate vessel,
+    instead of re-projecting the same, loop-invariant spill geometry once per
+    candidate.
+    """
     positions = track.resampled
     xs, ys = transformer.transform(positions["lon"].to_numpy(), positions["lat"].to_numpy())
     distances = np.array([projected_geometry.distance(Point(x, y)) for x, y in zip(xs, ys)])
@@ -182,10 +201,13 @@ def filter_candidates(
     """
     settings = settings or get_settings()
     geometry, _ = spill_geometry_and_time(spill)
+    # Built once and reused for every candidate: the spill geometry (and so
+    # its equal-area projection) does not change across the loop.
+    transformer, projected_geometry = _project(geometry)
 
     candidates: List[CandidateVessel] = []
     for mmsi, track in tracks.items():
-        cpa_distance_km, cpa_time = closest_point_of_approach(track, geometry)
+        cpa_distance_km, cpa_time = _cpa_with_projection(track, transformer, projected_geometry)
         if cpa_distance_km > settings.ais.search_radius_km:
             continue
         if is_stationary(track, settings.ais.min_moving_speed_knots):

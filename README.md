@@ -90,6 +90,32 @@ settings = get_settings()
 settings.detection.prob_threshold
 ```
 
+## Running the full pipeline
+
+Once a scene is on disk, run detection, alerting, and (if AIS data is on
+hand) vessel attribution in one call:
+
+```bash
+python scripts/run_pipeline.py --scene path/to/scene.tif --stub-model
+```
+
+`--stub-model` is required until a real checkpoint exists — a dark-pixel
+threshold stands in for the trained detector, and says so in its own output.
+Add `--ais path/to/export.csv` (or `.parquet`) to also run AIS-based vessel
+attribution for any spill that alerts; without it, an alerted spill still
+gets a full alert decision, just an empty vessel list rather than a crash.
+
+This writes one combined JSON per run — by default
+`data/processed/<scene_id>/pipeline_result.json` — holding, per spill: the
+spill object (polygon, area, confidence, …), the alert decision (including
+which rule(s) drove it — confidence, area, wind, exclusion zone, dedup), and
+the ranked vessel list (empty if not alerted or no `--ais` given).
+
+Add `--map` to also save a basic Folium map next to it (`map.html` by
+default, or `--map-output <path>`), showing every spill's polygon and any
+candidate vessel tracks, colour-coded by rank, with a popup per vessel naming
+its score and explanation string.
+
 ## Roadmap
 
 - **1.1** Satellite product search

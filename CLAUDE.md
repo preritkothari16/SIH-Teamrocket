@@ -21,9 +21,13 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 2.2 tracks + filter | `src/ais/{tracks,filter}.py` | **done** — interpolated CPA, stationarity screen |
 | 2.3 attribution scoring | `src/attribution/scoring.py` | **done** — 4-factor weighted score + explanation |
 | Phase 2 chain | `scripts/run_attribution.py` | **done, synthetic-validated only** — see Open Questions |
-| Phase 3 | alerts, env data, drift, dashboard | not built — next |
+| 3.1 wind lookup | `src/env_data/wind.py` | **done, local-fixture-only** — no CDS credentials here |
+| 3.2 alert registry + manager | `src/alerts/{registry,manager}.py` | **done** — sqlite registry, 5-rule decision + explain trail |
+| Phase 3 chain | `scripts/run_pipeline.py` | **done** — 1.1→3.2→(2.1-2.3) in one call, real-scene verified |
+| 3.4 map output | `src/output/map.py` | **done** — basic Folium map, `--map` on the Phase 3 chain |
+| Phase 4 | currents, drift, dashboard | not built — next |
 
-`pytest` → 302 passing, ~15-30s, fully offline. Run it before believing anything here.
+`pytest` → 370 passing, ~40-45s, fully offline. Run it before believing anything here.
 
 Phase 1 runs end to end: `scripts/run_detection.py --scene <tif> --stub-model`
 takes ~72 s on a 2048² scene. **There is still no trained checkpoint**, so
@@ -34,6 +38,14 @@ Phase 2 runs end to end: `scripts/run_attribution.py --spill <geojson> --ais <cs
 — query → tracks → filter → scoring, writes ranked candidates as JSON. Needs an
 AIS export (source-agnostic loader, see `src/ais/loader.py`); nothing ships
 with the repo, so this has only been run against synthetic fixtures so far.
+
+Phase 3 is the real end-to-end script: `scripts/run_pipeline.py --scene <tif>
+--stub-model [--ais <csv|parquet>] [--map]` — imports `run_detection.run()`
+and `run_attribution.attribute_spill()` as libraries (no shelling out),
+chains detection → alert manager → (if alerted) attribution, writes one
+combined JSON, and optionally a Folium map. **Verified against a real local
+scene** from the 1200-tile dataset below (2048², `--stub-model`), not just
+synthetic fixtures.
 
 ## Environment facts
 
@@ -48,6 +60,10 @@ with the repo, so this has only been run against synthetic fixtures so far.
   attribution. `LocalSceneSource` reads all 1200 in ~13 s.
 - Vendored coastline covers **only the Gujarat AOI**. For the dataset above,
   call `download_coastline()` first or nothing gets masked as land.
+- **No CDS API access here**: no `cdsapi` package, no `CDS_API_KEY`/`~/.cdsapirc`.
+  `get_wind()` needs an explicit `dataset=`/`env_data.wind_dataset_path`, or it
+  raises naming what's missing — real ERA5 has never been fetched or read in
+  this environment, only a synthetic fixture matching its layout.
 
 ## Architecture decisions worth not relitigating
 
@@ -95,6 +111,22 @@ with the repo, so this has only been run against synthetic fixtures so far.
   rectangles. `src/attribution/scoring.py::slick_axis_bearing()` does the
   `(90 - angle) % 180` conversion to a compass bearing; don't "fix" the sign
   without re-deriving it, the docstring is the wrong one.
+- **The alert registry is sqlite3, not parquet/JSON.** Dedup has to update an
+  existing row in place (drift, refined area, escalated status) when a later
+  scene re-detects the same event; a flat file would need a full rewrite to
+  do that safely. One row per persistent *event*, not per scene detection.
+- **`evaluate_alert()` takes wind speed as a plain `Optional[float]`, not a
+  wind-dataset lookup.** `process_spill()` is the thin wrapper that calls
+  `get_wind()` and swallows `EnvDataError`. Keeps every alert rule testable
+  with synthetic inputs and no dataset; an unavailable wind reading is
+  treated the same as an out-of-range one (marks "possible", never rejects).
+- **`ThresholdStubModel` calls the darkest 15% of a *tile* oil, by rank, not
+  by any absolute darkness.** Against a small patch on a flat, noiseless
+  background this ties out to near-100% "oil" (the quantile cutoff lands on
+  the background's own repeated value). Any synthetic scene fixture needs
+  background noise *and* a patch sized close to or above that 15% share, or
+  the stub model won't isolate it. Bit both the Phase 1 review's reprojection
+  test and Step 3.3's pipeline fixture before this was understood.
 
 ## Conventions
 
@@ -109,10 +141,11 @@ with the repo, so this has only been run against synthetic fixtures so far.
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest                      # 302 tests, offline
+.venv/Scripts/python.exe -m pytest                      # 370 tests, offline
 .venv/Scripts/python.exe scripts/run_detection.py --scene <tif> --stub-model
 .venv/Scripts/python.exe -m src.detection.train --smoke-test   # end-to-end, no data/GPU
 .venv/Scripts/python.exe scripts/run_attribution.py --spill <geojson> --ais <csv|parquet>
+.venv/Scripts/python.exe scripts/run_pipeline.py --scene <tif> --stub-model --map
 ```
 
 ```python
