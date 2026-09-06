@@ -139,3 +139,11 @@ its score and explanation string.
 - **5.3** Vessel attribution
 - **5.4** Drift prediction
 - **5.5** Dashboard and API
+
+## Future work
+
+- SAR-based dark-vessel detection in the same scene, to catch a spiller with its AIS transponder off entirely.
+- Optical (Sentinel-2) fusion, to confirm and better delineate a slick where cloud-free imagery overlaps the SAR acquisition.
+- Oil weathering, thickness, and volume estimation from multi-band/multi-temporal signatures, beyond today's single-thickness-class area estimate.
+- Full behavioral-anomaly ML for attribution, learning suspicious AIS patterns directly rather than the two hand-built factors in `src/attribution/anomaly_features.py`.
+- Automated live alert notifications (email/SMS/webhook) triggered directly from the alert manager's decisions.

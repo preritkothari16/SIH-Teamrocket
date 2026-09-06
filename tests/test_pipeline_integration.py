@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, List
 
 import numpy as np
 import pandas as pd
@@ -116,7 +117,7 @@ def test_run_pipeline_produces_the_expected_combined_structure(
     assert len(result["spills"]) >= 1
 
     for entry in result["spills"]:
-        assert set(entry.keys()) == {"spill", "alert", "vessels"}
+        assert set(entry.keys()) == {"spill", "alert", "vessels", "drift_forecast"}
         assert entry["spill"]["type"] == "Feature"
         assert "acquisition_timestamp" in entry["spill"]["properties"]
 
@@ -128,6 +129,14 @@ def test_run_pipeline_produces_the_expected_combined_structure(
             assert set(rule.keys()) == {"name", "passed", "reason"}
 
         assert isinstance(entry["vessels"], list)
+
+        # step 4.5: every spill - alerted or not - gets a forward drift
+        # forecast, independent of AIS/alert status.
+        forecast = entry["drift_forecast"]
+        assert [f["hours_elapsed"] for f in forecast] == [6.0, 12.0, 24.0, 48.0]
+        for f in forecast:
+            assert set(f.keys()) == {"hours_elapsed", "time", "polygon"}
+            assert f["polygon"]["type"] in ("Polygon", "LineString", "Point")
 
 
 def test_run_pipeline_writes_the_output_file(tmp_path: Path, scene_path: Path, settings) -> None:
@@ -209,3 +218,51 @@ def test_run_pipeline_skips_the_map_by_default(tmp_path: Path, scene_path: Path,
         settings=settings,
     )
     assert not (tmp_path / "map.html").exists()
+
+
+def test_run_pipeline_map_includes_the_drift_forecast_overlay(
+    tmp_path: Path, scene_path: Path, settings,
+) -> None:
+    map_output = tmp_path / "map.html"
+    run(
+        scene_path=scene_path, stub_model=True, tile_size=128, overlap=0,
+        output=tmp_path / "result.json", registry_path=tmp_path / "registry.sqlite3",
+        write_map=True, map_output=map_output, settings=settings,
+    )
+    html = map_output.read_text(encoding="utf-8").lower()
+    assert "forecast" in html  # the forecast popup text, baked into the saved HTML
+
+
+def test_run_pipeline_computes_a_hindcast_corridor_only_when_enabled(
+    tmp_path: Path, scene_path: Path, ais_path: Path, settings, monkeypatch,
+) -> None:
+    """The corridor is real work (a scatter + N backward steps per spill) -
+    it must only run when attribution.use_hindcasting is actually on, not
+    unconditionally alongside every attributed spill."""
+    import scripts.run_pipeline as run_pipeline_module
+
+    calls: List[Any] = []
+    original_hindcast_origin = run_pipeline_module.hindcast_origin
+
+    def _spy(*args, **kwargs):
+        calls.append((args, kwargs))
+        return original_hindcast_origin(*args, **kwargs)
+
+    monkeypatch.setattr(run_pipeline_module, "hindcast_origin", _spy)
+
+    run(
+        scene_path=scene_path, stub_model=True, tile_size=128, overlap=0,
+        ais_path=ais_path, output=tmp_path / "off.json",
+        registry_path=tmp_path / "registry_off.sqlite3", settings=settings,
+    )
+    assert calls == []
+
+    hindcast_settings = settings.model_copy(
+        update={"attribution": settings.attribution.model_copy(update={"use_hindcasting": True})}
+    )
+    run(
+        scene_path=scene_path, stub_model=True, tile_size=128, overlap=0,
+        ais_path=ais_path, output=tmp_path / "on.json",
+        registry_path=tmp_path / "registry_on.sqlite3", settings=hindcast_settings,
+    )
+    assert len(calls) >= 1

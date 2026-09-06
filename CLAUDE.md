@@ -29,9 +29,13 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 4.2 particle drift model | `src/drift/particle_model.py` | **done** — pure numpy Lagrangian stepper, same function hindcasts (`dt` sign flip) |
 | 4.3 forward drift forecast | `src/drift/forward.py` | **done** — 6/12/24/48h horizons, constant-environment assumption (see below) |
 | 4.4 hindcasting + attribution | `src/drift/hindcast.py`, `src/attribution/scoring.py` | **done** — origin corridor; `attribution.use_hindcasting` (default off) swaps it into scoring |
-| Phase 4 chain | dashboard | not built — next |
+| 4.5 drift wired into chain | `scripts/run_pipeline.py`, `src/output/map.py` | **done** — every spill gets a forecast; map/report/dashboard all overlay it |
+| 5.1 live ingestion polling | `src/ingestion/poller.py`, `scripts/run_live.py` | **done, never run against real CDSE** — stub-catalogue-tested only |
+| 5.2 AIS anomaly features | `src/attribution/anomaly_features.py` | **done** — gap + speed-change bonus factors, wired into scoring |
+| 5.3 incident report | `src/output/report.py` | **done** — standalone HTML (not PDF), `--report` on the Phase 3-4 chain |
+| 5.4 dashboard | `src/output/dashboard.py` | **done** — FastAPI, one page, toggleable map layers, real-scene verified |
 
-`pytest` → 425 passing, ~45-50s, fully offline. Run it before believing anything here.
+`pytest` → 515 passing, ~55-60s, fully offline. Run it before believing anything here.
 
 Phase 1 runs end to end: `scripts/run_detection.py --scene <tif> --stub-model`
 takes ~72 s on a 2048² scene. **There is still no trained checkpoint**, so
@@ -51,19 +55,53 @@ combined JSON, and optionally a Folium map. **Verified against a real local
 scene** from the 1200-tile dataset below (2048², `--stub-model`), not just
 synthetic fixtures.
 
-Phase 4 is drift, not yet wired into a chain script. `src/drift/forward.py`
-and `src/drift/hindcast.py` are library functions (`forecast_drift()`,
-`hindcast_origin()`) — nothing calls them from `run_pipeline.py` yet, and no
-CLI flag exists for either. Both sample wind + current **once**, at the
-spill's centroid and acquisition time, and hold that single vector pair
-constant for the whole run — there is no real forecast time series here
-(same reason as the wind/currents fixtures below), so a 48h-out forecast is
-honestly wrong the moment the real wind shifts, by design, not a bug.
-Hindcasting reuses the forward stepper with `dt` negated, per
+Phase 4 (drift) is wired all the way through as of step 4.5. `src/drift/
+forward.py` samples wind + current **once**, at the spill's centroid and
+acquisition time, and holds that single vector pair constant for the whole
+run — there is no real forecast time series here (same reason as the
+wind/currents fixtures below), so a 48h-out forecast is honestly wrong the
+moment the real wind shifts, by design, not a bug. Hindcasting
+(`src/drift/hindcast.py`) reuses the forward stepper with `dt` negated, per
 `particle_model.py`'s own design — there is no separate backward code path.
 `attribution.use_hindcasting` (config, default `false`) is the only thing
 that turns the hindcast corridor into an actual scoring change; when off,
 `scoring.py` is byte-for-byte the step-2.3 static-buffer path.
+`scripts/run_pipeline.py` computes a forward forecast for **every** spill
+(alerted or not — it needs neither AIS nor alert status) and, only when
+`use_hindcasting` is on, a hindcast corridor for each attributed spill.
+
+Phase 5 is final polish, all four steps independent of each other:
+
+- **5.1 live polling** (`src/ingestion/poller.py` + `scripts/run_live.py`):
+  `poll_once()` drives any `SceneSource` (real `CDSECatalogue` or a test
+  stub) — search since the last poll (strictly newer, so the boundary scene
+  is never re-fetched), download, run the pipeline. **Never run against the
+  real CDSE network** — no credentials here, tested only against a stubbed
+  catalogue (`tests/test_poller.py`).
+- **5.2 AIS anomaly features** (`src/attribution/anomaly_features.py`): two
+  bonus scoring factors — an AIS reporting gap, and slowing/stopping near
+  the slick relative to the vessel's own baseline speed. Each scores 0 (not
+  a penalty) when there isn't enough evidence. `attribution.weight_gap` /
+  `weight_speed_change` (0.075 each by default); the other four weights were
+  trimmed proportionally to keep the sum at 1.0. **Synthetic-validated
+  only** — no real AIS export has ever had a genuine transponder gap or
+  slowdown run through this.
+- **5.3 incident report** (`src/output/report.py`): standalone HTML (not
+  PDF — no new rendering dependency, and it reuses `build_map()`'s own
+  embed), `--report`/`--report-output` on `run_pipeline.py`.
+- **5.4 dashboard** (`src/output/dashboard.py`): FastAPI (already a
+  dependency; Streamlit is not installed here), one page at `/` per
+  `python -m src.output.dashboard --result <pipeline_result.json>` —
+  metadata, the same toggleable map, alert status, ranked vessel table.
+  Loads one result once at startup; not wired to the live poller.
+
+`src/output/map.py::build_map()` underlies all three of 4.5/5.3/5.4: slick,
+drift forecast, hindcast corridor (compute-on-demand, never persisted in the
+combined JSON — only the dashboard actually computes and passes it in), and
+vessel tracks are each their own `folium.FeatureGroup` under one
+`folium.LayerControl`, so any one layer can be toggled off in the rendered
+map itself; this is what "layer toggle" means in step 5.4, not
+dashboard-specific code.
 
 ## Environment facts
 
@@ -86,6 +124,10 @@ that turns the hindcast corridor into an actual scoring change; when off,
   `CMEMS_USERNAME`/`CMEMS_PASSWORD`. `get_current()` needs an explicit
   `dataset=`/`env_data.current_dataset_path` for the same reason — real
   CMEMS/HYCOM current data has never been fetched here.
+- **`fastapi`, `uvicorn`, `httpx` are already project dependencies**
+  (`requirements.txt`; `config.yaml`'s `api:` block existed before the
+  dashboard did) — step 5.4 needed no new install. Streamlit is not
+  installed here; that's why the dashboard is FastAPI, not a preference.
 
 ## Architecture decisions worth not relitigating
 
@@ -179,6 +221,23 @@ that turns the hindcast corridor into an actual scoring change; when off,
   solely to let scoring re-measure distance against a *different* polygon
   (the hindcast snapshot nearest the candidate's own CPA time) than the one
   `ais/filter.py` originally screened candidates against.
+- **A bonus attribution factor's neutral value is 0, not 0.5.**
+  `anomaly_features.py`'s gap/speed-change scores return 0 whenever there
+  isn't enough evidence (no SOG, single ping, already-slow baseline) —
+  unlike `alignment_score`'s 0.5-when-unknown, because there is no "neutral"
+  reading for a bonus factor to split the difference on: an unremarkable
+  track just isn't evidence, in either direction.
+- **`anomaly_features.py` operates on `CandidateVessel.track` (raw pings)**,
+  not `VesselTrack.resampled` — deliberately no interpolation fallback for
+  missing SOG (unlike `ais/filter.py::is_stationary()`'s displacement
+  fallback), since real AIS sources this project targets (NOAA, DMA) both
+  report SOG directly; keeping this simple was the actual tradeoff, not an
+  oversight.
+- **`report.py` and `dashboard.py` do not share table-rendering code**,
+  despite looking similar (both build a vessel table from the same payload
+  shape) — the report's is per-spill, the dashboard's aggregates every
+  alerted spill with an added spill-id column. Both are ~10-line functions;
+  forcing one shared, parameterized version was judged not worth it.
 
 ## Conventions
 
@@ -193,11 +252,13 @@ that turns the hindcast corridor into an actual scoring change; when off,
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest                      # 425 tests, offline
+.venv/Scripts/python.exe -m pytest                      # 515 tests, offline
 .venv/Scripts/python.exe scripts/run_detection.py --scene <tif> --stub-model
 .venv/Scripts/python.exe -m src.detection.train --smoke-test   # end-to-end, no data/GPU
 .venv/Scripts/python.exe scripts/run_attribution.py --spill <geojson> --ais <csv|parquet>
-.venv/Scripts/python.exe scripts/run_pipeline.py --scene <tif> --stub-model --map
+.venv/Scripts/python.exe scripts/run_pipeline.py --scene <tif> --stub-model --map --report
+.venv/Scripts/python.exe scripts/run_live.py --aoi configs/aoi.geojson --interval 900   # needs CDSE creds, untested here
+.venv/Scripts/python.exe -m src.output.dashboard --result data/processed/<scene_id>/pipeline_result.json
 ```
 
 ```python
@@ -229,8 +290,17 @@ when asked; push only when asked (they are separate requests).
    only. Next best lead: search HELCOM's Baltic surveillance reports for a
    case that actually sits inside DMA's coverage. Currently validated only
    against `tests/test_attribution_integration.py`'s synthetic fixture.
-5. Drift (4.1-4.4) is library code only — `forecast_drift()`/
-   `hindcast_origin()` aren't called from `scripts/run_pipeline.py`, there's
-   no CLI flag, and `use_hindcasting` has never been exercised against a real
-   AIS export (synthetic fixtures only, same caveat as #4). Which of these —
-   pipeline wiring, map overlay, dashboard — is next?
+5. `use_hindcasting` has never been exercised against a real AIS export —
+   synthetic fixtures only, same caveat as #4.
+6. Live polling (5.1) has never touched the real CDSE network — no
+   credentials in this environment, `poll_once()`/`run_live.py` are
+   stub-catalogue-tested only. First real run will be the first time
+   `CDSECatalogue.fetch()`'s downloaded-archive naming and
+   `LocalSceneSource`'s `.SAFE.zip` reading actually meet in practice for a
+   *live* scene (Phase 1 has only ever read pre-downloaded local files).
+7. The dashboard (5.4) and live poller (5.1) are not connected — the
+   dashboard serves one already-computed `pipeline_result.json`, loaded once
+   at startup; there is no live-refreshing view of a running poller yet.
+8. No PDF export — step 5.3 chose standalone HTML over PDF for reliability
+   (no new rendering dependency). If a literal PDF is ever required,
+   `report.py`'s own docstring names where a `weasyprint` call would go.

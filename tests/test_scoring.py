@@ -289,6 +289,53 @@ def test_use_hindcasting_improves_rank_for_a_vessel_that_left_before_the_oil_dri
     assert guilty_hindcast_rank <= guilty_static_rank
 
 
+# --------------------------------------------------------------------------- #
+# step 5.2: gap/speed-change bonus factors, wired into score_candidate
+# --------------------------------------------------------------------------- #
+def test_score_candidate_rewards_a_track_with_an_ais_gap_and_a_slowdown(settings) -> None:
+    """The two step 5.2 factors must actually move score_candidate's total,
+    not just exist as standalone functions - a candidate whose track shows
+    an AIS gap and a slowdown right at CPA must outscore an otherwise
+    identical candidate with a clean, steady track."""
+    cpa_time = ACQUIRED - timedelta(hours=6.0)
+
+    clean_track = pd.DataFrame({
+        "timestamp": pd.to_datetime(
+            [cpa_time + timedelta(minutes=20 * i) for i in range(-3, 4)], utc=True,
+        ),
+        "lat": [20.0] * 7, "lon": [70.0] * 7, "sog": [10.0] * 7,
+    })
+    suspicious_track = pd.DataFrame({
+        "timestamp": pd.to_datetime(
+            [cpa_time - timedelta(hours=10), cpa_time - timedelta(minutes=20),
+             cpa_time, cpa_time + timedelta(minutes=20)], utc=True,
+        ),
+        "lat": [20.0] * 4, "lon": [70.0] * 4, "sog": [10.0, 10.0, 0.5, 10.0],
+    })
+
+    clean = CandidateVessel(
+        mmsi=1, cpa_distance_km=1.0, cpa_time=cpa_time, track=clean_track,
+        vessel_name="CLEAN", vessel_type="Tanker", heading_at_cpa=70.0,
+    )
+    suspicious = CandidateVessel(
+        mmsi=2, cpa_distance_km=1.0, cpa_time=cpa_time, track=suspicious_track,
+        vessel_name="SUSPICIOUS", vessel_type="Tanker", heading_at_cpa=70.0,
+    )
+
+    clean_scored = score_candidate(clean, ACQUIRED, slick_orientation_deg=20.0, settings=settings)
+    suspicious_scored = score_candidate(
+        suspicious, ACQUIRED, slick_orientation_deg=20.0, settings=settings,
+    )
+
+    assert clean_scored.gap == 0.0
+    assert clean_scored.speed_change == 0.0
+    assert suspicious_scored.gap > 0.0
+    assert suspicious_scored.speed_change > 0.0
+    assert suspicious_scored.score > clean_scored.score
+    assert "AIS reporting gap" in suspicious_scored.gap_explanation
+    assert "slowed from" in suspicious_scored.speed_change_explanation
+
+
 def test_use_hindcasting_off_ignores_a_supplied_corridor(settings) -> None:
     """The corridor is inert unless use_hindcasting is on - callers can pass
     it unconditionally without it changing anything by default."""

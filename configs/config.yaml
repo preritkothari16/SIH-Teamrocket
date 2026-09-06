@@ -169,14 +169,22 @@ attribution:
   default_type_prior: 0.3          # vessel_type missing or not in the table above
 
   # combination weights - must sum to 1.0
-  weight_spatial: 0.3
-  weight_temporal: 0.2
-  weight_alignment: 0.35
+  weight_spatial: 0.25
+  weight_temporal: 0.15
+  weight_alignment: 0.30
   weight_type: 0.15
+  # step 5.2: bonus factors, see src/attribution/anomaly_features.py
+  weight_gap: 0.075
+  weight_speed_change: 0.075
 
   # step 4.4: match candidates against the drift-hindcast corridor instead of
   # the spill's fixed, final polygon. Off by default.
   use_hindcasting: false
+
+  # step 5.2: AIS anomaly feature tunables
+  min_gap_hours: 1.0             # AIS gaps at/below this are routine, not suspicious
+  gap_scale_hours: 6.0           # gap_score saturation scale
+  min_baseline_speed_knots: 3.0  # below this, too slow overall to assess a further slowdown
 
 # --- environmental data: wind (step 3.1), currents later (step 4.1) ---
 env_data:

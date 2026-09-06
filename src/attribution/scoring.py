@@ -24,6 +24,14 @@ same four numbers, e.g. ``"1.2 km CPA, 5h before image, track within 8° of
 slick axis, tanker"`` - this is required output, not a debugging aid: the
 whole point of scoring vessels instead of just ranking by distance is to be
 able to say *why* one was ranked above another.
+
+Step 5.2 adds two more, modestly-weighted bonus factors on top of the four
+above (see :mod:`src.attribution.anomaly_features`): :func:`gap_score` (an
+unusually long AIS reporting gap) and :func:`speed_change_score` (slowing or
+stopping near the slick relative to the vessel's own baseline speed). Each
+scores 0 - no bonus, not a penalty - whenever there isn't enough evidence to
+say anything, and each carries its own explanation string on
+:class:`ScoredCandidate`, separate from the four-factor ``explanation`` above.
 """
 
 from __future__ import annotations
@@ -37,6 +45,12 @@ from pyproj import Transformer
 from shapely.geometry import Point
 
 from src.ais.filter import CandidateVessel
+from src.attribution.anomaly_features import (
+    gap_explanation,
+    gap_score,
+    speed_change_explanation,
+    speed_change_score,
+)
 from src.characterization.spill_object import WGS84, to_equal_area
 from src.config import AttributionConfig, Settings, get_settings
 from src.drift.hindcast import OriginSnapshot, nearest_snapshot
@@ -179,6 +193,13 @@ class ScoredCandidate:
     #: `candidate.cpa_distance_km` unless `use_hindcasting` swapped in the
     #: nearest hindcast polygon (see `_effective_cpa_distance_km`).
     cpa_distance_km: float
+    #: step 5.2 bonus factors - see src/attribution/anomaly_features.py.
+    #: Each has its own explanation string, separate from `explanation`
+    #: above (the original four-factor summary), per that step's brief.
+    gap: float
+    gap_explanation: str
+    speed_change: float
+    speed_change_explanation: str
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -192,6 +213,10 @@ class ScoredCandidate:
             "temporal_score": round(self.temporal, 4),
             "alignment_score": round(self.alignment, 4),
             "type_prior": round(self.type_prior, 4),
+            "gap_score": round(self.gap, 4),
+            "gap_explanation": self.gap_explanation,
+            "speed_change_score": round(self.speed_change, 4),
+            "speed_change_explanation": self.speed_change_explanation,
             "explanation": self.explanation,
         }
 
@@ -255,11 +280,18 @@ def score_candidate(
     alignment = alignment_score(candidate.heading_at_cpa, bearing)
     prior = type_prior(candidate.vessel_type, cfg)
 
+    gap, gap_hours = gap_score(candidate.track, cfg.min_gap_hours, cfg.gap_scale_hours)
+    speed_change, baseline_speed, speed_at_cpa = speed_change_score(
+        candidate.track, candidate.cpa_time, cfg.min_baseline_speed_knots,
+    )
+
     score = (
         cfg.weight_spatial * spatial
         + cfg.weight_temporal * temporal
         + cfg.weight_alignment * alignment
         + cfg.weight_type * prior
+        + cfg.weight_gap * gap
+        + cfg.weight_speed_change * speed_change
     )
 
     return ScoredCandidate(
@@ -267,6 +299,9 @@ def score_candidate(
         alignment=alignment, type_prior=prior,
         explanation=build_explanation(candidate, acquisition_time, bearing, cpa_distance_km),
         cpa_distance_km=cpa_distance_km,
+        gap=gap, gap_explanation=gap_explanation(gap_hours, cfg.min_gap_hours),
+        speed_change=speed_change,
+        speed_change_explanation=speed_change_explanation(baseline_speed, speed_at_cpa),
     )
 
 

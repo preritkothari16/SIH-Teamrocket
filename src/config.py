@@ -396,10 +396,18 @@ class AttributionConfig(BaseModel):
     )
     default_type_prior: float = Field(default=0.3, ge=0.0, le=1.0)
 
-    weight_spatial: float = Field(default=0.3, ge=0.0)
-    weight_temporal: float = Field(default=0.2, ge=0.0)
-    weight_alignment: float = Field(default=0.35, ge=0.0)
+    weight_spatial: float = Field(default=0.25, ge=0.0)
+    weight_temporal: float = Field(default=0.15, ge=0.0)
+    weight_alignment: float = Field(default=0.30, ge=0.0)
     weight_type: float = Field(default=0.15, ge=0.0)
+    # step 5.2: bonus factors on top of the four MVP ones above - see
+    # src/attribution/anomaly_features.py. Modest by design (each factor
+    # scores 0 whenever there isn't enough evidence to say anything), not
+    # promoted to alignment_score's weight; the four MVP weights were
+    # trimmed proportionally to make room without changing their relative
+    # order (alignment stays the largest single weight).
+    weight_gap: float = Field(default=0.075, ge=0.0)
+    weight_speed_change: float = Field(default=0.075, ge=0.0)
 
     # step 4.4: when true, spatial_score compares a candidate's CPA position
     # against the drift-hindcast polygon nearest its CPA time instead of the
@@ -407,11 +415,17 @@ class AttributionConfig(BaseModel):
     # default so the static-buffer path (step 2.3) keeps working unchanged.
     use_hindcasting: bool = False
 
+    # step 5.2: AIS anomaly feature tunables (src/attribution/anomaly_features.py).
+    min_gap_hours: float = Field(default=1.0, ge=0.0)     # gaps at/below this are routine
+    gap_scale_hours: float = Field(default=6.0, gt=0.0)   # gap_score saturation scale
+    min_baseline_speed_knots: float = Field(default=3.0, ge=0.0)  # below this, too slow to assess a further slowdown
+
     @model_validator(mode="after")
     def _weights_sum_to_one(self) -> "AttributionConfig":
         total = (
             self.weight_spatial + self.weight_temporal
             + self.weight_alignment + self.weight_type
+            + self.weight_gap + self.weight_speed_change
         )
         if abs(total - 1.0) > 1e-6:
             raise ValueError(f"attribution weight_* fields must sum to 1.0, got {total}")

@@ -1,15 +1,18 @@
-"""Phase 3 end to end: a raw scene path in, alerts + ranked vessels out.
+"""Phase 3-4 end to end: a raw scene path in, alerts + ranked vessels + drift
+forecast out.
 
 The first true end-to-end script: raw scene -> ingestion -> preprocessing ->
 detection -> look-alike filter -> characterization -> alert manager ->
-(if alerted) AIS query -> tracks -> filter -> scoring.
+forward drift forecast -> (if alerted) AIS query -> tracks -> filter ->
+(if ``attribution.use_hindcasting``) hindcast corridor -> scoring.
 
-Reuses each earlier phase's own script as a **library** -
-:func:`scripts.run_detection.run` for steps 1.1-1.6 and
-:func:`scripts.run_attribution.attribute_spill` for steps 2.1-2.3 - rather
-than reimplementing chain assembly that already exists and is already
-tested. Nothing here is shelled out to; every step is a plain Python import
-and function call.
+Reuses each earlier phase's own script/module as a **library** -
+:func:`scripts.run_detection.run` for steps 1.1-1.6,
+:func:`scripts.run_attribution.attribute_spill` for steps 2.1-2.3, and
+:func:`src.drift.forward.forecast_drift` / :func:`src.drift.hindcast.hindcast_origin`
+for step 4.3/4.4 - rather than reimplementing chain assembly that already
+exists and is already tested. Nothing here is shelled out to; every step is a
+plain Python import and function call.
 
 Usage::
 
@@ -28,6 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from shapely.geometry import mapping
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:  # allow `python scripts/run_pipeline.py`
     sys.path.insert(0, str(REPO_ROOT))
@@ -36,12 +41,29 @@ from src.ais.loader import load_ais  # noqa: E402
 from src.alerts.manager import process_spill  # noqa: E402
 from src.alerts.registry import SpillRegistry  # noqa: E402
 from src.config import Settings, get_settings  # noqa: E402
+from src.drift.forward import forecast_drift  # noqa: E402
+from src.drift.hindcast import hindcast_origin  # noqa: E402
 from src.output.map import MapBuildError, save_map  # noqa: E402
+from src.output.report import ReportBuildError, save_report  # noqa: E402
 
 from scripts import run_attribution  # noqa: E402
 from scripts import run_detection  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+
+def _drift_forecast_payload(spill: Dict[str, Any], settings: Settings) -> List[Dict[str, Any]]:
+    """Forward drift forecast for one spill (see :mod:`src.drift.forward`),
+    JSON-ready: each horizon's swarm as a GeoJSON polygon (its convex hull)."""
+    forecasts = forecast_drift(spill, settings=settings)
+    return [
+        {
+            "hours_elapsed": f.hours_elapsed,
+            "time": f.time.isoformat(),
+            "polygon": mapping(f.polygon),
+        }
+        for f in forecasts
+    ]
 
 
 def run(
@@ -56,6 +78,8 @@ def run(
     output: Optional[Path] = None,
     write_map: bool = False,
     map_output: Optional[Path] = None,
+    write_report: bool = False,
+    report_output: Optional[Path] = None,
     registry_path: Optional[Path] = None,
     settings: Optional[Settings] = None,
 ) -> Dict[str, Any]:
@@ -65,9 +89,20 @@ def run(
     alert decision, just an empty vessel list rather than a crash - useful
     for running the pipeline before any AIS export is on hand.
 
+    Every spill also gets a forward drift forecast (step 4.3, 6/12/24/48h -
+    see :mod:`src.drift.forward`), independent of AIS/alert status, since it
+    needs neither. If ``attribution.use_hindcasting`` is set, an alerted
+    spill being attributed additionally gets a hindcast corridor (step 4.4 -
+    see :mod:`src.drift.hindcast`) computed and threaded into scoring; it is
+    not computed otherwise since nothing else would consume it.
+
     ``write_map`` additionally saves a basic Folium map (see
-    :mod:`src.output.map`) of every spill and candidate vessel track,
-    alongside the combined JSON.
+    :mod:`src.output.map`) of every spill, its drift forecast, and any
+    candidate vessel tracks, alongside the combined JSON. ``write_report``
+    (step 5.3, see :mod:`src.output.report`) additionally saves a standalone
+    HTML incident report - spill summary, that same map embedded, the ranked
+    vessel table with explanations, and the drift forecast - independent of
+    ``write_map`` (the report builds and embeds its own map either way).
     """
     settings = settings or get_settings()
 
@@ -103,7 +138,13 @@ def run(
 
             vessels: List[Dict[str, Any]] = []
             if decision.alert and ais is not None:
-                attribution = run_attribution.attribute_spill(spill, ais, settings=settings)
+                hindcast_corridor = (
+                    hindcast_origin(spill, settings=settings)
+                    if settings.attribution.use_hindcasting else None
+                )
+                attribution = run_attribution.attribute_spill(
+                    spill, ais, settings=settings, hindcast_corridor=hindcast_corridor,
+                )
                 vessels = attribution["candidates"]
             elif decision.alert:
                 logger.info(
@@ -111,11 +152,16 @@ def run(
                     decision.spill_id,
                 )
 
-            results.append({"spill": spill, "alert": decision.to_dict(), "vessels": vessels})
+            drift_forecast = _drift_forecast_payload(spill, settings)
+            results.append({
+                "spill": spill, "alert": decision.to_dict(), "vessels": vessels,
+                "drift_forecast": drift_forecast,
+            })
 
         if len(spills) > max_printed:
             print(f"      ... {len(spills) - max_printed} more spill(s) evaluated")
         print(f"      {alerted_count} of {len(spills)} spill(s) alerted")
+        print(f"[4.3] drift forecast computed for {len(spills)} spill(s) (6/12/24/48h)")
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -140,6 +186,14 @@ def run(
             print(f"[3.4] wrote {map_target}\n")
         except MapBuildError as exc:
             logger.info("skipping map: %s", exc)
+
+    if write_report:
+        report_target = Path(report_output) if report_output else target.with_name("report.html")
+        try:
+            save_report(payload, report_target)
+            print(f"[5.3] wrote {report_target}\n")
+        except ReportBuildError as exc:
+            logger.info("skipping report: %s", exc)
 
     return payload
 
@@ -166,6 +220,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="also save a basic Folium map (spill + vessel tracks)")
     parser.add_argument("--map-output", type=Path, default=None,
                         help="where the map HTML goes; defaults next to --output")
+    parser.add_argument("--report", dest="write_report", action="store_true",
+                        help="also save a standalone HTML incident report")
+    parser.add_argument("--report-output", type=Path, default=None,
+                        help="where the report HTML goes; defaults next to --output")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -188,6 +246,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         output=args.output,
         write_map=args.write_map,
         map_output=args.map_output,
+        write_report=args.write_report,
+        report_output=args.report_output,
     )
     return 0
 

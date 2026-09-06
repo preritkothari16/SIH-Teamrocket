@@ -27,7 +27,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:  # allow `python scripts/run_attribution.py`
@@ -39,6 +39,7 @@ from src.ais.query import query_ais_for_spill, spill_geometry_and_time  # noqa: 
 from src.ais.tracks import build_tracks  # noqa: E402
 from src.attribution.scoring import ScoredCandidate, score_candidates  # noqa: E402
 from src.config import Settings, get_settings  # noqa: E402
+from src.drift.hindcast import OriginSnapshot, hindcast_origin  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +81,15 @@ def _candidate_payload(scored: ScoredCandidate) -> Dict[str, Any]:
 
 def attribute_spill(
     spill: Dict[str, Any], ais: "Any", settings: Optional[Settings] = None,
+    hindcast_corridor: Optional[Sequence[OriginSnapshot]] = None,
 ) -> Dict[str, Any]:
-    """Run query -> tracks -> filter -> scoring for one spill Feature."""
+    """Run query -> tracks -> filter -> scoring for one spill Feature.
+
+    ``hindcast_corridor`` (see :func:`src.drift.hindcast.hindcast_origin`) is
+    passed straight through to :func:`src.attribution.scoring.score_candidates`
+    - only consulted there when ``settings.attribution.use_hindcasting`` is
+    true; harmless to pass unconditionally otherwise.
+    """
     settings = settings or get_settings()
     properties = spill.get("properties") or {}
     geometry, acquisition_time = spill_geometry_and_time(spill)
@@ -98,6 +106,7 @@ def attribute_spill(
 
     scored = score_candidates(
         candidates, acquisition_time, properties.get("orientation_deg"), settings=settings,
+        hindcast_corridor=hindcast_corridor,
     )
     print(f"[2.3] {len(scored)} scored candidate(s), best first:")
     for s in scored[:5]:
@@ -125,7 +134,10 @@ def run(
     ais = load_ais(ais_path)
     print(f"      {ais['mmsi'].nunique()} vessel(s), {len(ais)} position report(s) in {ais_path}\n")
 
-    results = [attribute_spill(spill, ais, settings=settings) for spill in spills]
+    results = []
+    for spill in spills:
+        corridor = hindcast_origin(spill, settings=settings) if settings.attribution.use_hindcasting else None
+        results.append(attribute_spill(spill, ais, settings=settings, hindcast_corridor=corridor))
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
