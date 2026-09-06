@@ -17,14 +17,23 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 1.5 look-alike filter | `src/detection/lookalike_filter.py` | **done** — contrast / elongation / edge rules |
 | 1.6 characterization | `src/characterization/spill_object.py` | **done** — equal-area polygons → GeoJSON |
 | Phase 1 chain | `scripts/run_detection.py` | **done** — 1.1→1.6 for one scene |
-| Phase 2 | alerts, env data, AIS, attribution, drift, dashboard | not built — next |
+| 2.1 AIS load + query | `src/ais/{loader,query}.py` | **done** — space-time box around a spill |
+| 2.2 tracks + filter | `src/ais/{tracks,filter}.py` | **done** — interpolated CPA, stationarity screen |
+| 2.3 attribution scoring | `src/attribution/scoring.py` | **done** — 4-factor weighted score + explanation |
+| Phase 2 chain | `scripts/run_attribution.py` | **done, synthetic-validated only** — see Open Questions |
+| Phase 3 | alerts, env data, drift, dashboard | not built — next |
 
-`pytest` → 225 passing, ~19s, fully offline. Run it before believing anything here.
+`pytest` → 302 passing, ~15-30s, fully offline. Run it before believing anything here.
 
 Phase 1 runs end to end: `scripts/run_detection.py --scene <tif> --stub-model`
 takes ~72 s on a 2048² scene. **There is still no trained checkpoint**, so
 `--stub-model` (a dark-pixel threshold, not a detector) is the only way to run
 the chain today; it labels its own output as such.
+
+Phase 2 runs end to end: `scripts/run_attribution.py --spill <geojson> --ais <csv|parquet>`
+— query → tracks → filter → scoring, writes ranked candidates as JSON. Needs an
+AIS export (source-agnostic loader, see `src/ais/loader.py`); nothing ships
+with the repo, so this has only been run against synthetic fixtures so far.
 
 ## Environment facts
 
@@ -75,6 +84,17 @@ the chain today; it labels its own output as such.
 - **Inference maps dB onto the 0-255 range the model trained on** using
   `detection.input_db_min/max`. That mapping is an assumption, not a
   calibration — revisit once a checkpoint is trained on real tiles.
+- **AIS search window is one-sided**: `[acquisition_time - ais.search_window_hours,
+  acquisition_time]`, never symmetric. A vessel has to have been near the
+  slick at or before it was seen, not after — don't re-add a forward window.
+- **CPA is measured against each track's resampled (interpolated) positions**,
+  not raw AIS pings (`src/ais/tracks.py`) — AIS sampling is sparse/uneven, so
+  the true closest approach often falls between two pings.
+- **`orientation_and_elongation()`'s angle is CCW from east**, despite its own
+  docstring claiming clockwise — verified empirically by rotating known
+  rectangles. `src/attribution/scoring.py::slick_axis_bearing()` does the
+  `(90 - angle) % 180` conversion to a compass bearing; don't "fix" the sign
+  without re-deriving it, the docstring is the wrong one.
 
 ## Conventions
 
@@ -89,9 +109,10 @@ the chain today; it labels its own output as such.
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest                      # 225 tests, offline
+.venv/Scripts/python.exe -m pytest                      # 302 tests, offline
 .venv/Scripts/python.exe scripts/run_detection.py --scene <tif> --stub-model
 .venv/Scripts/python.exe -m src.detection.train --smoke-test   # end-to-end, no data/GPU
+.venv/Scripts/python.exe scripts/run_attribution.py --spill <geojson> --ais <csv|parquet>
 ```
 
 ```python
@@ -112,5 +133,14 @@ when asked; push only when asked (they are separate requests).
 
 1. Where are the MKLab labels / is that dataset being downloaded at all?
 2. Can acquisition timestamps be recovered for the 1200-tile set? Without them
-   AIS attribution cannot work — it needs the SAR acquisition time ±6 h.
+   AIS attribution cannot work — it needs a real acquisition time to search
+   AIS around (`ais.search_window_hours`, now 48h one-sided).
 3. Which machine has a GPU for the real training run?
+4. No real-case validation for AIS attribution yet. Researched two real,
+   documented spill+AIS cases (Maersk Kiera 2012 UK, prosecuted; Dona Liberta
+   2012 Angola/Congo, SkyTruth-documented) but neither is usable: both are
+   open-ocean cases identified via satellite AIS, and this project's two open
+   archives (Danish Maritime Authority, NOAA MarineCadastre) are terrestrial-
+   only. Next best lead: search HELCOM's Baltic surveillance reports for a
+   case that actually sits inside DMA's coverage. Currently validated only
+   against `tests/test_attribution_integration.py`'s synthetic fixture.

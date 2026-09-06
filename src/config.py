@@ -331,13 +331,61 @@ class AlertsConfig(BaseModel):
 
 
 class AISConfig(BaseModel):
-    """AIS retrieval and vessel attribution (step 5.x)."""
+    """AIS retrieval and vessel attribution (step 2.x).
 
-    search_window_hours: float = Field(default=6.0, gt=0)
+    ``search_window_hours`` is one-sided: a vessel must have been near the
+    spill at or before the SAR acquisition time, not after it, so the window
+    is ``[acquisition_time - search_window_hours, acquisition_time]``.
+    """
+
+    search_window_hours: float = Field(default=48.0, gt=0)
     search_radius_km: float = Field(default=25.0, gt=0)
+    interpolation_minutes: float = Field(default=15.0, gt=0)
+    min_moving_speed_knots: float = Field(default=0.5, ge=0.0)
     min_track_points: int = Field(default=3, gt=0)
     max_candidate_vessels: int = Field(default=50, gt=0)
-    attribution_score_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class AttributionConfig(BaseModel):
+    """Vessel attribution scoring (step 2.3).
+
+    Combines four independent pieces of evidence into one 0-1 score per
+    candidate vessel - see :mod:`src.attribution.scoring` for what each one
+    measures and why. ``weight_*`` must sum to 1.0.
+    """
+
+    spatial_scale_km: float = Field(default=10.0, gt=0)
+    temporal_optimal_lag_hours: float = Field(default=6.0, ge=0)
+    temporal_scale_hours: float = Field(default=8.0, gt=0)
+
+    type_priors: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "tanker": 1.0,
+            "cargo": 0.8,
+            "passenger": 0.4,
+            "fishing": 0.3,
+            "other": 0.3,
+            "leisure": 0.2,
+        }
+    )
+    default_type_prior: float = Field(default=0.3, ge=0.0, le=1.0)
+
+    weight_spatial: float = Field(default=0.3, ge=0.0)
+    weight_temporal: float = Field(default=0.2, ge=0.0)
+    weight_alignment: float = Field(default=0.35, ge=0.0)
+    weight_type: float = Field(default=0.15, ge=0.0)
+
+    score_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _weights_sum_to_one(self) -> "AttributionConfig":
+        total = (
+            self.weight_spatial + self.weight_temporal
+            + self.weight_alignment + self.weight_type
+        )
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(f"attribution weight_* fields must sum to 1.0, got {total}")
+        return self
 
 
 class DriftConfig(BaseModel):
@@ -383,6 +431,7 @@ class Settings(BaseSettings):
     )
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     ais: AISConfig = Field(default_factory=AISConfig)
+    attribution: AttributionConfig = Field(default_factory=AttributionConfig)
     drift: DriftConfig = Field(default_factory=DriftConfig)
     api: APIConfig = Field(default_factory=APIConfig)
 
@@ -452,6 +501,7 @@ __all__ = [
     "CharacterizationConfig",
     "AlertsConfig",
     "AISConfig",
+    "AttributionConfig",
     "DriftConfig",
     "APIConfig",
     "config_file_override",

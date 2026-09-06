@@ -120,13 +120,47 @@ alerts:
     critical: 100.0
   coastline_proximity_km: 25.0     # escalate if slick this close to shore
 
-# --- AIS retrieval + vessel attribution (step 5.x) ---
+# --- AIS retrieval + track reconstruction (step 2.1-2.2) ---
 ais:
-  search_window_hours: 6           # +/- around SAR acquisition time
-  search_radius_km: 25.0
+  search_window_hours: 48          # look-back only: [acquisition - this, acquisition]
+  search_radius_km: 25.0           # spill-bbox buffer for the search, and the CPA cutoff
+  interpolation_minutes: 15.0      # cadence used to fill gaps between sparse AIS pings
+  min_moving_speed_knots: 0.5      # at/below this for the whole window -> moored, not a suspect
   min_track_points: 3
   max_candidate_vessels: 50
-  attribution_score_threshold: 0.5
+
+# --- vessel attribution scoring (step 2.3) ---
+attribution:
+  spatial_scale_km: 10.0           # spatial_score decays to ~0.37 at this CPA distance
+
+  # temporal_score peaks at temporal_optimal_lag_hours before acquisition and
+  # falls off in both directions (a Gaussian bump, not a straight line): very
+  # recent transits are penalised because oil needs time to spread into a
+  # visible slick, and old ones because the vessel could be long gone by then.
+  temporal_optimal_lag_hours: 6.0
+  temporal_scale_hours: 8.0
+
+  # alignment_score compares the vessel's heading at CPA to the slick's major
+  # axis - the strongest single discriminator of the four (see scoring.py).
+
+  # type_prior: configurable per vessel type. Tankers/cargo carry the bulk
+  # oil that causes a spill of this scale; fishing/leisure rarely do.
+  type_priors:
+    tanker: 1.0
+    cargo: 0.8
+    passenger: 0.4
+    fishing: 0.3
+    other: 0.3
+    leisure: 0.2
+  default_type_prior: 0.3          # vessel_type missing or not in the table above
+
+  # combination weights - must sum to 1.0
+  weight_spatial: 0.3
+  weight_temporal: 0.2
+  weight_alignment: 0.35
+  weight_type: 0.15
+
+  score_threshold: 0.5             # candidates at/above this are a plausible match
 
 # --- drift prediction (step 5.x) ---
 drift:
