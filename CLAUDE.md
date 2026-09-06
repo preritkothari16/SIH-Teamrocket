@@ -25,9 +25,13 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 3.2 alert registry + manager | `src/alerts/{registry,manager}.py` | **done** — sqlite registry, 5-rule decision + explain trail |
 | Phase 3 chain | `scripts/run_pipeline.py` | **done** — 1.1→3.2→(2.1-2.3) in one call, real-scene verified |
 | 3.4 map output | `src/output/map.py` | **done** — basic Folium map, `--map` on the Phase 3 chain |
-| Phase 4 | currents, drift, dashboard | not built — next |
+| 4.1 currents + env service | `src/env_data/{currents,service,grid}.py` | **done, local-fixture-only** — no CMEMS credentials here |
+| 4.2 particle drift model | `src/drift/particle_model.py` | **done** — pure numpy Lagrangian stepper, same function hindcasts (`dt` sign flip) |
+| 4.3 forward drift forecast | `src/drift/forward.py` | **done** — 6/12/24/48h horizons, constant-environment assumption (see below) |
+| 4.4 hindcasting + attribution | `src/drift/hindcast.py`, `src/attribution/scoring.py` | **done** — origin corridor; `attribution.use_hindcasting` (default off) swaps it into scoring |
+| Phase 4 chain | dashboard | not built — next |
 
-`pytest` → 370 passing, ~40-45s, fully offline. Run it before believing anything here.
+`pytest` → 425 passing, ~45-50s, fully offline. Run it before believing anything here.
 
 Phase 1 runs end to end: `scripts/run_detection.py --scene <tif> --stub-model`
 takes ~72 s on a 2048² scene. **There is still no trained checkpoint**, so
@@ -47,6 +51,20 @@ combined JSON, and optionally a Folium map. **Verified against a real local
 scene** from the 1200-tile dataset below (2048², `--stub-model`), not just
 synthetic fixtures.
 
+Phase 4 is drift, not yet wired into a chain script. `src/drift/forward.py`
+and `src/drift/hindcast.py` are library functions (`forecast_drift()`,
+`hindcast_origin()`) — nothing calls them from `run_pipeline.py` yet, and no
+CLI flag exists for either. Both sample wind + current **once**, at the
+spill's centroid and acquisition time, and hold that single vector pair
+constant for the whole run — there is no real forecast time series here
+(same reason as the wind/currents fixtures below), so a 48h-out forecast is
+honestly wrong the moment the real wind shifts, by design, not a bug.
+Hindcasting reuses the forward stepper with `dt` negated, per
+`particle_model.py`'s own design — there is no separate backward code path.
+`attribution.use_hindcasting` (config, default `false`) is the only thing
+that turns the hindcast corridor into an actual scoring change; when off,
+`scoring.py` is byte-for-byte the step-2.3 static-buffer path.
+
 ## Environment facts
 
 - venv at `.venv/` (Python 3.11.9). Run things as `.venv/Scripts/python.exe -m ...`.
@@ -64,6 +82,10 @@ synthetic fixtures.
   `get_wind()` needs an explicit `dataset=`/`env_data.wind_dataset_path`, or it
   raises naming what's missing — real ERA5 has never been fetched or read in
   this environment, only a synthetic fixture matching its layout.
+- **No CMEMS credentials here either**: no `copernicusmarine` package, no
+  `CMEMS_USERNAME`/`CMEMS_PASSWORD`. `get_current()` needs an explicit
+  `dataset=`/`env_data.current_dataset_path` for the same reason — real
+  CMEMS/HYCOM current data has never been fetched here.
 
 ## Architecture decisions worth not relitigating
 
@@ -127,6 +149,36 @@ synthetic fixtures.
   background noise *and* a patch sized close to or above that 15% share, or
   the stub model won't isolate it. Bit both the Phase 1 review's reprojection
   test and Step 3.3's pipeline fixture before this was understood.
+- **`env_data/wind.py` and `env_data/currents.py` share one generic lookup**
+  (`env_data/grid.py::lookup_vector()`), and `env_data/service.py` wraps both
+  behind `get_environment()`, each field independently degrading to `None`
+  rather than failing the call — same "unavailable is a fact, not an error"
+  treatment `alerts/manager.py` already gave wind before this existed.
+- **`particle_model.py`'s hindcast is a sign flip, not a second
+  implementation.** `step_particles(dt_hours=...)` displaces by
+  `velocity * dt_seconds`; only that final multiply carries `dt`'s sign. The
+  Ekman deflection itself does **not** flip — it's a fixed transform of the
+  (always forward-sense) wind vector. Diffusion noise is redrawn every call,
+  so a forward-then-backward round trip lands close to, not exactly on, the
+  start; a `diffusion_std_ms=0` round trip is exact, and a test pins both.
+- **Forward forecast and hindcast both sample wind/current once** (at the
+  spill's centroid and acquisition time) and hold it constant for the whole
+  run — there is no real forecast time series in this environment, only an
+  instant field at best. Documented in both modules' docstrings, not a bug to
+  "fix" by fetching per-step; swap in a real series later without touching
+  the stepping itself.
+- **A particle swarm's footprint is its convex hull**, everywhere in
+  `drift/`. No density contours or KDE — matches this project's general bias
+  toward the simplest representation that is still useful downstream (map
+  display, hindcast-vs-vessel-position scoring).
+- **`attribution.use_hindcasting` is `false` by default and inert unless a
+  corridor is actually passed in** — `score_candidate()`/`score_candidates()`
+  take an optional `hindcast_corridor`; with the flag off, or no corridor, or
+  a candidate with no `position_at_cpa`, scoring is exactly the step-2.3
+  static-buffer path. `CandidateVessel.position_at_cpa` (lon, lat) exists
+  solely to let scoring re-measure distance against a *different* polygon
+  (the hindcast snapshot nearest the candidate's own CPA time) than the one
+  `ais/filter.py` originally screened candidates against.
 
 ## Conventions
 
@@ -141,7 +193,7 @@ synthetic fixtures.
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest                      # 370 tests, offline
+.venv/Scripts/python.exe -m pytest                      # 425 tests, offline
 .venv/Scripts/python.exe scripts/run_detection.py --scene <tif> --stub-model
 .venv/Scripts/python.exe -m src.detection.train --smoke-test   # end-to-end, no data/GPU
 .venv/Scripts/python.exe scripts/run_attribution.py --spill <geojson> --ais <csv|parquet>
@@ -177,3 +229,8 @@ when asked; push only when asked (they are separate requests).
    only. Next best lead: search HELCOM's Baltic surveillance reports for a
    case that actually sits inside DMA's coverage. Currently validated only
    against `tests/test_attribution_integration.py`'s synthetic fixture.
+5. Drift (4.1-4.4) is library code only — `forecast_drift()`/
+   `hindcast_origin()` aren't called from `scripts/run_pipeline.py`, there's
+   no CLI flag, and `use_hindcasting` has never been exercised against a real
+   AIS export (synthetic fixtures only, same caveat as #4). Which of these —
+   pipeline wiring, map overlay, dashboard — is next?

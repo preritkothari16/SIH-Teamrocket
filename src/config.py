@@ -401,6 +401,12 @@ class AttributionConfig(BaseModel):
     weight_alignment: float = Field(default=0.35, ge=0.0)
     weight_type: float = Field(default=0.15, ge=0.0)
 
+    # step 4.4: when true, spatial_score compares a candidate's CPA position
+    # against the drift-hindcast polygon nearest its CPA time instead of the
+    # spill's fixed, final polygon - see src/drift/hindcast.py. Off by
+    # default so the static-buffer path (step 2.3) keeps working unchanged.
+    use_hindcasting: bool = False
+
     @model_validator(mode="after")
     def _weights_sum_to_one(self) -> "AttributionConfig":
         total = (
@@ -413,8 +419,8 @@ class AttributionConfig(BaseModel):
 
 
 class EnvDataConfig(BaseModel):
-    """Environmental vector fields: wind now (step 3.1), currents later
-    (step 4.1) - see src/env_data/wind.py.
+    """Environmental vector fields: wind (step 3.1) and ocean currents
+    (step 4.1) - see src/env_data/{wind,currents,service}.py.
     """
 
     # Local/cached NetCDF (ERA5 u10/v10 layout). None -> get_wind() falls back
@@ -423,6 +429,12 @@ class EnvDataConfig(BaseModel):
     wind_dataset_path: Optional[Path] = None
     interpolation_method: str = "linear"  # linear | nearest, spatial lookup
     cds_area_buffer_deg: float = Field(default=1.0, gt=0)
+
+    # Local/cached NetCDF (CMEMS/HYCOM uo/vo layout). None -> get_current()
+    # falls back to fetching via Copernicus Marine if credentials resolve;
+    # otherwise it raises naming what's missing.
+    current_dataset_path: Optional[Path] = None
+    cmems_area_buffer_deg: float = Field(default=1.0, gt=0)
 
     @field_validator("interpolation_method")
     @classmethod
@@ -434,11 +446,24 @@ class EnvDataConfig(BaseModel):
 
 
 class DriftConfig(BaseModel):
-    """Lagrangian drift forecast (step 5.x)."""
+    """Lagrangian particle drift forecast (step 4.2)."""
 
     forecast_hours: float = Field(default=48.0, gt=0)
-    timestep_minutes: float = Field(default=30.0, gt=0)
+    timestep_hours: float = Field(default=1.0, gt=0)
+    snapshot_interval_hours: float = Field(default=6.0, gt=0)
     wind_drift_factor: float = Field(default=0.03, ge=0.0, le=1.0)
+
+    # Ekman/Coriolis deflection of wind-driven surface drift, in degrees
+    # clockwise from the wind vector itself - positive (to the right) is the
+    # Northern Hemisphere convention and this project's default; flip the
+    # sign for Southern Hemisphere use. 10-20 deg is the usual real-world
+    # range.
+    wind_deflection_deg: float = Field(default=15.0, ge=-90.0, le=90.0)
+
+    # small random-walk term: independent per-step velocity noise, not a
+    # formal diffusivity - deliberately simple (see particle_model.py).
+    diffusion_std_ms: float = Field(default=0.05, ge=0.0)
+
     n_particles: int = Field(default=1000, gt=0)
 
 

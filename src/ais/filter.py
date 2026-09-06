@@ -46,6 +46,9 @@ class CandidateVessel:
     vessel_type: Optional[str] = None
     #: compass bearing (deg clockwise from north) at CPA, for alignment_score.
     heading_at_cpa: Optional[float] = None
+    #: (lon, lat) at CPA - lets attribution.scoring recompute distance against
+    #: a hindcast polygon instead of the fixed spill one (use_hindcasting).
+    position_at_cpa: Optional["tuple[float, float]"] = None
 
 
 def _project(geometry: BaseGeometry, source_crs: str = WGS84):
@@ -75,18 +78,21 @@ def closest_point_of_approach(
     equal-area projection centred on the spill, never in raw degrees.
     """
     transformer, projected_geometry = _project(geometry)
-    return _cpa_with_projection(track, transformer, projected_geometry)
+    distance_km, cpa_time, _position = _cpa_with_projection(track, transformer, projected_geometry)
+    return distance_km, cpa_time
 
 
 def _cpa_with_projection(
     track: VesselTrack, transformer: Transformer, projected_geometry: BaseGeometry
-) -> "tuple[float, datetime]":
+) -> "tuple[float, datetime, tuple[float, float]]":
     """The actual CPA computation, given an already-projected spill geometry.
 
     Split out so :func:`filter_candidates` can build the (spill-geometry,
     transformer) pair once and reuse it across every candidate vessel,
     instead of re-projecting the same, loop-invariant spill geometry once per
-    candidate.
+    candidate. Also returns the vessel's own (lon, lat) at CPA - not used by
+    :func:`closest_point_of_approach`'s callers, but needed by
+    :func:`filter_candidates` for ``attribution.scoring``'s hindcasting path.
     """
     positions = track.resampled
     xs, ys = transformer.transform(positions["lon"].to_numpy(), positions["lat"].to_numpy())
@@ -96,7 +102,10 @@ def _cpa_with_projection(
     cpa_time = positions["timestamp"].iloc[index]
     if isinstance(cpa_time, pd.Timestamp):
         cpa_time = cpa_time.to_pydatetime()
-    return float(distances[index]) / 1000.0, cpa_time
+    position_at_cpa = (
+        float(positions["lon"].iloc[index]), float(positions["lat"].iloc[index]),
+    )
+    return float(distances[index]) / 1000.0, cpa_time, position_at_cpa
 
 
 def _speed_from_displacement_knots(track: VesselTrack) -> np.ndarray:
@@ -207,7 +216,9 @@ def filter_candidates(
 
     candidates: List[CandidateVessel] = []
     for mmsi, track in tracks.items():
-        cpa_distance_km, cpa_time = _cpa_with_projection(track, transformer, projected_geometry)
+        cpa_distance_km, cpa_time, position_at_cpa = _cpa_with_projection(
+            track, transformer, projected_geometry,
+        )
         if cpa_distance_km > settings.ais.search_radius_km:
             continue
         if is_stationary(track, settings.ais.min_moving_speed_knots):
@@ -221,6 +232,7 @@ def filter_candidates(
                 vessel_name=track.vessel_name,
                 vessel_type=track.vessel_type,
                 heading_at_cpa=heading_at_cpa(track, cpa_time),
+                position_at_cpa=position_at_cpa,
             )
         )
 

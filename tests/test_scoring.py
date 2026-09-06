@@ -11,11 +11,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import numpy as np
 import pandas as pd
 import pytest
+from shapely.geometry import box
 
 from src.ais.filter import CandidateVessel
 from src.attribution.scoring import (
+    _distance_to_polygon_km,
     alignment_score,
     build_explanation,
     score_candidate,
@@ -26,6 +29,7 @@ from src.attribution.scoring import (
     type_prior,
 )
 from src.config import load_settings
+from src.drift.hindcast import OriginSnapshot
 
 ACQUIRED = datetime(2023, 5, 14, 0, 0, 0, tzinfo=timezone.utc)
 
@@ -221,3 +225,86 @@ def test_score_candidate_score_is_bounded_zero_to_one(settings) -> None:
 
 def test_score_candidates_on_an_empty_list_yields_nothing(settings) -> None:
     assert score_candidates([], ACQUIRED, 20.0, settings=settings) == []
+
+
+# --------------------------------------------------------------------------- #
+# use_hindcasting - step 4.4: score against the drift corridor, not the fixed
+# spill polygon, when a candidate's CPA happened while the oil was elsewhere
+# --------------------------------------------------------------------------- #
+FINAL_POLYGON = box(10.0, 0.0, 10.01, 0.01)  # the spill as observed at acquisition
+EARLY_POLYGON = box(10.30, 0.0, 10.31, 0.01)  # ~33 km east: oil's estimated position 5h earlier
+GUILTY_POSITION = (10.305, 0.005)  # inside EARLY_POLYGON, where the oil actually was at CPA
+INNOCENT_POSITION = (10.005, 0.005)  # inside FINAL_POLYGON
+
+
+def test_use_hindcasting_improves_rank_for_a_vessel_that_left_before_the_oil_drifted(
+    settings,
+) -> None:
+    """GUILTY was directly under the oil 5h before acquisition, then left; by
+    acquisition time the oil had drifted ~33 km away, so scoring GUILTY
+    against the spill's *final* polygon (the static path) makes it look like
+    it was nowhere near the slick. INNOCENT merely ended up near where the
+    oil ended up, at a less plausible lag. Hindcasting must correct this: it
+    should not leave GUILTY ranked below INNOCENT once corrected for where
+    the oil actually was at CPA time.
+    """
+    static_guilty_distance = _distance_to_polygon_km(*GUILTY_POSITION, FINAL_POLYGON)
+    static_innocent_distance = _distance_to_polygon_km(*INNOCENT_POSITION, FINAL_POLYGON)
+
+    guilty = CandidateVessel(
+        mmsi=1, cpa_distance_km=static_guilty_distance, cpa_time=ACQUIRED - timedelta(hours=5),
+        track=pd.DataFrame(), vessel_name="GUILTY", vessel_type="Tanker",
+        heading_at_cpa=70.0, position_at_cpa=GUILTY_POSITION,
+    )
+    innocent = CandidateVessel(
+        mmsi=2, cpa_distance_km=static_innocent_distance, cpa_time=ACQUIRED - timedelta(hours=1),
+        track=pd.DataFrame(), vessel_name="INNOCENT", vessel_type="Tanker",
+        heading_at_cpa=70.0, position_at_cpa=INNOCENT_POSITION,
+    )
+    corridor = [
+        OriginSnapshot(
+            time=ACQUIRED, hours_before_acquisition=0.0,
+            positions=np.empty((0, 2)), polygon=FINAL_POLYGON,
+        ),
+        OriginSnapshot(
+            time=ACQUIRED - timedelta(hours=5), hours_before_acquisition=5.0,
+            positions=np.empty((0, 2)), polygon=EARLY_POLYGON,
+        ),
+    ]
+
+    static_scores = score_candidates([guilty, innocent], ACQUIRED, slick_orientation_deg=20.0, settings=settings)
+    assert [s.candidate.mmsi for s in static_scores] == [2, 1]  # INNOCENT unfairly ranked first
+
+    hindcast_settings = settings.model_copy(
+        update={"attribution": settings.attribution.model_copy(update={"use_hindcasting": True})}
+    )
+    hindcast_scores = score_candidates(
+        [guilty, innocent], ACQUIRED, slick_orientation_deg=20.0,
+        settings=hindcast_settings, hindcast_corridor=corridor,
+    )
+    assert hindcast_scores[0].candidate.mmsi == 1  # GUILTY now ranks first
+    # GUILTY's rank strictly improved (2nd -> 1st); it was never worsened.
+    guilty_static_rank = [s.candidate.mmsi for s in static_scores].index(1)
+    guilty_hindcast_rank = [s.candidate.mmsi for s in hindcast_scores].index(1)
+    assert guilty_hindcast_rank <= guilty_static_rank
+
+
+def test_use_hindcasting_off_ignores_a_supplied_corridor(settings) -> None:
+    """The corridor is inert unless use_hindcasting is on - callers can pass
+    it unconditionally without it changing anything by default."""
+    guilty = CandidateVessel(
+        mmsi=1, cpa_distance_km=_distance_to_polygon_km(*GUILTY_POSITION, FINAL_POLYGON),
+        cpa_time=ACQUIRED - timedelta(hours=5), track=pd.DataFrame(),
+        vessel_name="GUILTY", vessel_type="Tanker", heading_at_cpa=70.0,
+        position_at_cpa=GUILTY_POSITION,
+    )
+    corridor = [
+        OriginSnapshot(
+            time=ACQUIRED - timedelta(hours=5), hours_before_acquisition=5.0,
+            positions=np.empty((0, 2)), polygon=EARLY_POLYGON,
+        ),
+    ]
+    without_corridor = score_candidate(guilty, ACQUIRED, 20.0, settings=settings)
+    with_corridor = score_candidate(guilty, ACQUIRED, 20.0, settings=settings, hindcast_corridor=corridor)
+    assert without_corridor.score == pytest.approx(with_corridor.score)
+    assert without_corridor.cpa_distance_km == pytest.approx(with_corridor.cpa_distance_km)

@@ -31,10 +31,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
+
+from pyproj import Transformer
+from shapely.geometry import Point
 
 from src.ais.filter import CandidateVessel
+from src.characterization.spill_object import WGS84, to_equal_area
 from src.config import AttributionConfig, Settings, get_settings
+from src.drift.hindcast import OriginSnapshot, nearest_snapshot
 
 #: src.characterization.spill_object.orientation_and_elongation() reports its
 #: angle counter-clockwise from east (standard math convention), mod 180 -
@@ -111,6 +116,42 @@ def alignment_score(
     return 1.0 - diff / 90.0
 
 
+def _distance_to_polygon_km(lon: float, lat: float, polygon) -> float:
+    """Great-enough-circle distance from ``(lon, lat)`` to ``polygon``, in an
+    equal-area CRS centred on the polygon itself - the same one-transformer
+    pattern :func:`src.ais.filter._project` uses, needed here because
+    ``use_hindcasting`` measures against a *different* polygon (the nearest
+    hindcast snapshot) per candidate rather than the spill's fixed one.
+    """
+    projected_polygon, equal_area = to_equal_area(polygon, WGS84)
+    transformer = Transformer.from_crs(WGS84, equal_area, always_xy=True)
+    x, y = transformer.transform(lon, lat)
+    return projected_polygon.distance(Point(x, y)) / 1000.0
+
+
+def _effective_cpa_distance_km(
+    candidate: CandidateVessel,
+    config: AttributionConfig,
+    hindcast_corridor: Optional[Sequence[OriginSnapshot]],
+) -> float:
+    """The CPA distance :func:`spatial_score` actually scores against.
+
+    With ``use_hindcasting`` off (the default) - or when no corridor was
+    supplied, or a candidate carries no CPA position - this is just
+    ``candidate.cpa_distance_km``, the static distance to the spill's fixed,
+    final polygon (step 2.3's original path, unchanged). With it on, distance
+    is instead measured from the candidate's actual position at CPA to the
+    hindcast polygon nearest that CPA time - the oil's estimated footprint
+    back when the vessel was actually there, not where it drifted to by
+    acquisition time.
+    """
+    if not config.use_hindcasting or not hindcast_corridor or candidate.position_at_cpa is None:
+        return candidate.cpa_distance_km
+    snapshot = nearest_snapshot(hindcast_corridor, candidate.cpa_time)
+    lon, lat = candidate.position_at_cpa
+    return _distance_to_polygon_km(lon, lat, snapshot.polygon)
+
+
 def type_prior(vessel_type: Optional[str], config: AttributionConfig) -> float:
     """Configurable per-type weight: tankers/cargo score higher than fishing/
     leisure by default, since the former carry the bulk oil that causes a
@@ -134,13 +175,17 @@ class ScoredCandidate:
     alignment: float
     type_prior: float
     explanation: str
+    #: distance actually scored by `spatial` - equal to
+    #: `candidate.cpa_distance_km` unless `use_hindcasting` swapped in the
+    #: nearest hindcast polygon (see `_effective_cpa_distance_km`).
+    cpa_distance_km: float
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "mmsi": self.candidate.mmsi,
             "vessel_name": self.candidate.vessel_name,
             "vessel_type": self.candidate.vessel_type,
-            "cpa_distance_km": round(self.candidate.cpa_distance_km, 3),
+            "cpa_distance_km": round(self.cpa_distance_km, 3),
             "cpa_time": self.candidate.cpa_time.isoformat(),
             "score": round(self.score, 4),
             "spatial_score": round(self.spatial, 4),
@@ -154,13 +199,21 @@ class ScoredCandidate:
 def build_explanation(
     candidate: CandidateVessel, acquisition_time: datetime,
     slick_bearing: Optional[float],
+    cpa_distance_km: Optional[float] = None,
 ) -> str:
     """A short, human-readable summary of the same four factors that scored
     this candidate, e.g. ``"1.2 km CPA, 5h before image, track within 8° of
     slick axis, tanker"``.
+
+    ``cpa_distance_km`` defaults to ``candidate.cpa_distance_km`` but is
+    overridden by :func:`score_candidate` when ``use_hindcasting`` swapped in
+    a different distance, so the explanation names the number that was
+    actually scored, not the static one.
     """
+    if cpa_distance_km is None:
+        cpa_distance_km = candidate.cpa_distance_km
     lag_hours = (acquisition_time - candidate.cpa_time).total_seconds() / 3600.0
-    parts = [f"{candidate.cpa_distance_km:.1f} km CPA"]
+    parts = [f"{cpa_distance_km:.1f} km CPA"]
     parts.append(
         f"{lag_hours:.0f}h before image" if lag_hours >= 0
         else f"{abs(lag_hours):.0f}h after image"
@@ -181,13 +234,20 @@ def score_candidate(
     acquisition_time: datetime,
     slick_orientation_deg: Optional[float],
     settings: Optional[Settings] = None,
+    hindcast_corridor: Optional[Sequence[OriginSnapshot]] = None,
 ) -> ScoredCandidate:
-    """Score one candidate against a spill's acquisition time and orientation."""
+    """Score one candidate against a spill's acquisition time and orientation.
+
+    ``hindcast_corridor`` (see :func:`src.drift.hindcast.hindcast_origin`) is
+    only consulted when ``settings.attribution.use_hindcasting`` is true;
+    otherwise scoring is exactly the step 2.3 static-buffer path.
+    """
     settings = settings or get_settings()
     cfg = settings.attribution
     bearing = slick_axis_bearing(slick_orientation_deg)
+    cpa_distance_km = _effective_cpa_distance_km(candidate, cfg, hindcast_corridor)
 
-    spatial = spatial_score(candidate.cpa_distance_km, cfg.spatial_scale_km)
+    spatial = spatial_score(cpa_distance_km, cfg.spatial_scale_km)
     temporal = temporal_score(
         candidate.cpa_time, acquisition_time,
         cfg.temporal_optimal_lag_hours, cfg.temporal_scale_hours,
@@ -205,7 +265,8 @@ def score_candidate(
     return ScoredCandidate(
         candidate=candidate, score=score, spatial=spatial, temporal=temporal,
         alignment=alignment, type_prior=prior,
-        explanation=build_explanation(candidate, acquisition_time, bearing),
+        explanation=build_explanation(candidate, acquisition_time, bearing, cpa_distance_km),
+        cpa_distance_km=cpa_distance_km,
     )
 
 
@@ -214,11 +275,12 @@ def score_candidates(
     acquisition_time: datetime,
     slick_orientation_deg: Optional[float],
     settings: Optional[Settings] = None,
+    hindcast_corridor: Optional[Sequence[OriginSnapshot]] = None,
 ) -> List[ScoredCandidate]:
     """Score every candidate and rank them highest-score first."""
     settings = settings or get_settings()
     scored = [
-        score_candidate(c, acquisition_time, slick_orientation_deg, settings)
+        score_candidate(c, acquisition_time, slick_orientation_deg, settings, hindcast_corridor)
         for c in candidates
     ]
     scored.sort(key=lambda s: s.score, reverse=True)

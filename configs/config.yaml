@@ -174,17 +174,26 @@ attribution:
   weight_alignment: 0.35
   weight_type: 0.15
 
+  # step 4.4: match candidates against the drift-hindcast corridor instead of
+  # the spill's fixed, final polygon. Off by default.
+  use_hindcasting: false
+
 # --- environmental data: wind (step 3.1), currents later (step 4.1) ---
 env_data:
   wind_dataset_path: null        # local/cached NetCDF (ERA5 u10/v10); null -> CDS API if configured
   interpolation_method: linear   # linear | nearest, spatial lookup
-  cds_area_buffer_deg: 1.0       # bounding-box half-width around a CDS fetch request
+  cds_area_buffer_deg: 1.0       # bounding-box half-width around a CDS wind fetch request
+  current_dataset_path: null     # local/cached NetCDF (CMEMS/HYCOM uo/vo); null -> CMEMS if configured
+  cmems_area_buffer_deg: 1.0     # bounding-box half-width around a CMEMS current fetch request
 
 # --- drift prediction (step 5.x) ---
 drift:
   forecast_hours: 48
-  timestep_minutes: 30
-  wind_drift_factor: 0.03          # % of wind speed added to surface current
+  timestep_hours: 1.0              # step size; sign flips for hindcasting
+  snapshot_interval_hours: 6.0
+  wind_drift_factor: 0.03          # fraction of wind velocity added to surface current
+  wind_deflection_deg: 15.0        # Ekman deflection, right of wind (N hemisphere default)
+  diffusion_std_ms: 0.05           # small random-walk velocity noise per step
   n_particles: 1000
 
 # --- dashboard / api ---

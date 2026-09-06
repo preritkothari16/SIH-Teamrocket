@@ -23,14 +23,13 @@ Evaluation order:
 :func:`evaluate_alert` is the pure decision (wind speed is a plain
 ``Optional[float]`` argument, so it needs no wind dataset to test).
 :func:`process_spill` is the convenience entry point that actually calls
-:func:`src.env_data.wind.get_wind` for the spill's centroid/time first,
-tolerating the lookup being unavailable.
+:func:`src.env_data.service.get_environment` for the spill's centroid/time
+first, tolerating the lookup being unavailable.
 """
 
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -45,10 +44,8 @@ from shapely.ops import transform as shapely_transform
 from src.alerts.registry import SpillRecord, SpillRegistry
 from src.characterization.spill_object import WGS84, to_equal_area
 from src.config import Settings, get_settings
-from src.env_data.wind import EnvDataError, get_wind
+from src.env_data.service import get_environment
 from src.ingestion.types import as_utc
-
-logger = logging.getLogger(__name__)
 
 
 class AlertsError(RuntimeError):
@@ -291,11 +288,12 @@ def process_spill(
     settings: Optional[Settings] = None,
 ) -> AlertDecision:
     """Convenience entry point: fetches wind for the spill's centroid/time via
-    :func:`src.env_data.wind.get_wind`, then calls :func:`evaluate_alert`.
+    :func:`src.env_data.service.get_environment`, then calls
+    :func:`evaluate_alert`.
 
     A failed wind lookup (no dataset configured, point outside the grid, ...)
-    is not fatal - :func:`wind_rule` already treats an unknown speed the same
-    as an out-of-range one.
+    is not fatal - ``get_environment()`` already degrades it to ``None``, and
+    :func:`wind_rule` treats an unknown speed the same as an out-of-range one.
     """
     settings = settings or get_settings()
     properties = spill.get("properties") or {}
@@ -303,11 +301,9 @@ def process_spill(
     centroid = geometry.centroid
     acquisition_time = _parse_timestamp(properties.get("acquisition_timestamp"))
 
-    wind_speed_ms: Optional[float] = None
-    try:
-        wind_speed_ms = get_wind(centroid.y, centroid.x, acquisition_time, settings=settings).speed_ms
-    except EnvDataError as exc:
-        logger.info("wind lookup unavailable for this spill: %s", exc)
+    environment = get_environment(centroid.y, centroid.x, acquisition_time, settings=settings)
+    wind = environment["wind"]
+    wind_speed_ms = wind.speed_ms if wind is not None else None
 
     return evaluate_alert(
         spill, registry, wind_speed_ms=wind_speed_ms,
