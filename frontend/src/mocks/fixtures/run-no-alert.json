@@ -1,0 +1,28 @@
+{
+  "spill": {
+    "scene_id": "scene-001",
+    "acquisition_timestamp": "2024-03-15T10:30:00Z",
+    "confidence": 0.85,
+    "area_km2": 12.5,
+    "centroid": { "lat": 28.1234, "lon": -80.5678 },
+    "bbox": { "minLon": -81.0, "minLat": 27.5, "maxLon": -80.0, "maxLat": 28.5 },
+    "polygon": {
+      "type": "Polygon",
+      "coordinates": [[[-80.8, 27.8], [-80.5, 28.2], [-80.2, 28.0], [-80.5, 27.5], [-80.8, 27.8]]]
+    },
+    "major_axis_bearing": 180.5,
+    "elongation": 3.2
+  },
+  "alert": {
+    "spill_id": "spill-001",
+    "status": "none",
+    "rules_fired": [],
+    "first_seen": "2024-03-15T10:30:00Z",
+    "last_updated": "2024-03-15T10:30:00Z"
+  },
+  "vessels": [],
+  "drift": {
+    "forecast": [],
+    "hindcast": []
+  }
+}

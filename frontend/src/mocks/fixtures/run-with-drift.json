@@ -1,0 +1,123 @@
+{
+  "spill": {
+    "scene_id": "scene-003",
+    "acquisition_timestamp": "2024-05-20T08:45:00Z",
+    "confidence": 0.91,
+    "area_km2": 25.7,
+    "centroid": { "lat": 31.2345, "lon": -92.5678 },
+    "bbox": { "minLon": -93.0, "minLat": 30.5, "maxLon": -92.0, "maxLat": 31.5 },
+    "polygon": {
+      "type": "Polygon",
+      "coordinates": [[[-92.5, 30.8], [-92.0, 31.2], [-91.5, 31.0], [-91.8, 30.5], [-92.5, 30.8]]]
+    },
+    "major_axis_bearing": 45.0,
+    "elongation": 5.8
+  },
+  "alert": {
+    "spill_id": "spill-003",
+    "status": "update",
+    "rules_fired": ["area_growth_rule", "velocity_rule"],
+    "first_seen": "2024-05-20T08:45:00Z",
+    "last_updated": "2024-05-20T09:10:00Z"
+  },
+  "vessels": [
+    {
+      "mmsi": "367123452",
+      "name": "TANKER Gamma",
+      "vessel_type": "tanker",
+      "score": 0.88,
+      "explanation": "Vessel detected in spill corridor; high score match",
+      "cpa_distance_km": 1.5,
+      "cpa_time": "2024-05-20T09:00:00Z",
+      "track": {
+        "type": "LineString",
+        "coordinates": [[-92.2, 31.0], [-92.0, 31.3], [-91.8, 31.6], [-91.6, 31.9]]
+      }
+    },
+    {
+      "mmsi": "367123453",
+      "name": "TANKER Delta",
+      "vessel_type": "tanker",
+      "score": 0.45,
+      "explanation": "Low confidence; possible look-alike",
+      "cpa_distance_km": 12.3,
+      "cpa_time": "2024-05-20T09:30:00Z",
+      "track": {
+        "type": "LineString",
+        "coordinates": [[-92.1, 30.9], [-91.9, 31.2], [-91.7, 31.5]]
+      }
+    },
+    {
+      "mmsi": "367123454",
+      "name": "FISHER Epsilon",
+      "vessel_type": "fishing",
+      "score": 0.33,
+      "explanation": "Fishing vessel near edge of predicted drift",
+      "cpa_distance_km": 15.1,
+      "cpa_time": "2024-05-20T10:00:00Z",
+      "track": {
+        "type": "LineString",
+        "coordinates": [[-92.0, 30.7], [-91.8, 31.0], [-91.6, 31.3]]
+      }
+    }
+  ],
+  "drift": {
+    "forecast": [
+      {
+        "hours": 6,
+        "time": "2024-05-20T14:45:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-92.2, 30.5], [-91.8, 31.0], [-91.3, 30.8], [-91.7, 30.2], [-92.2, 30.5]]]
+        }
+      },
+      {
+        "hours": 12,
+        "time": "2024-05-21T02:45:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-91.8, 30.2], [-91.2, 30.8], [-90.5, 30.5], [-91.0, 29.8], [-91.8, 30.2]]]
+        }
+      },
+      {
+        "hours": 24,
+        "time": "2024-05-21T14:45:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-91.2, 29.8], [-90.5, 30.3], [-89.5, 30.0], [-90.2, 29.2], [-91.2, 29.8]]]
+        }
+      },
+      {
+        "hours": 48,
+        "time": "2024-05-23T02:45:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-89.8, 28.5], [-88.8, 29.0], [-87.5, 28.5], [-88.2, 27.8], [-89.8, 28.5]]]
+        }
+      }
+    ],
+    "hindcast": [
+      {
+        "time": "2024-05-20T08:45:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-92.6, 30.4], [-92.1, 30.9], [-91.5, 30.7], [-92.0, 30.2], [-92.6, 30.4]]]
+        }
+      },
+      {
+        "time": "2024-05-20T10:45:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-92.3, 30.2], [-91.7, 30.7], [-91.0, 30.5], [-91.5, 30.0], [-92.3, 30.2]]]
+        }
+      },
+      {
+        "time": "2024-05-20T12:45:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-92.0, 30.0], [-91.3, 30.5], [-90.5, 30.3], [-91.0, 29.8], [-92.0, 30.0]]]
+        }
+      }
+    ]
+  }
+}

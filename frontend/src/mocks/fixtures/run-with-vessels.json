@@ -1,0 +1,87 @@
+{
+  "spill": {
+    "scene_id": "scene-002",
+    "acquisition_timestamp": "2024-04-10T14:20:00Z",
+    "confidence": 0.72,
+    "area_km2": 8.3,
+    "centroid": { "lat": 24.1111, "lon": -89.9999 },
+    "bbox": { "minLon": -90.5, "minLat": 23.5, "maxLon": -89.5, "maxLat": 24.5 },
+    "polygon": {
+      "type": "Polygon",
+      "coordinates": [[[-90.2, 23.8], [-89.7, 24.2], [-89.3, 24.0], [-89.8, 23.5], [-90.2, 23.8]]]
+    },
+    "major_axis_bearing": 90.0,
+    "elongation": 2.1
+  },
+  "alert": {
+    "spill_id": "spill-002",
+    "status": "possible",
+    "rules_fired": ["contrast_rule", "elongation_rule"],
+    "first_seen": "2024-04-10T14:20:00Z",
+    "last_updated": "2024-04-10T14:25:00Z"
+  },
+  "vessels": [
+    {
+      "mmsi": "367123450",
+      "name": "TANKER Alpha",
+      "vessel_type": "tanker",
+      "score": 0.92,
+      "explanation": "High backscatter match; trajectory crosses spill origin",
+      "cpa_distance_km": 3.2,
+      "cpa_time": "2024-04-10T14:45:00Z",
+      "track": {
+        "type": "LineString",
+        "coordinates": [[-89.9, 24.0], [-89.7, 24.3], [-89.5, 24.6], [-89.3, 24.9]]
+      }
+    },
+    {
+      "mmsi": "367123451",
+      "name": "TANKER Beta",
+      "vessel_type": "tanker",
+      "score": 0.67,
+      "explanation": "Medium confidence match; parallel trajectory",
+      "cpa_distance_km": 8.7,
+      "cpa_time": "2024-04-10T15:10:00Z",
+      "track": {
+        "type": "LineString",
+        "coordinates": [[-89.8, 23.9], [-89.6, 24.2], [-89.4, 24.5]]
+      }
+    }
+  ],
+  "drift": {
+    "forecast": [
+      {
+        "hours": 6,
+        "time": "2024-04-10T20:20:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-89.5, 23.5], [-89.0, 24.0], [-88.5, 23.8], [-89.2, 23.0], [-89.5, 23.5]]]
+        }
+      },
+      {
+        "hours": 12,
+        "time": "2024-04-11T02:20:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-89.2, 23.2], [-88.5, 23.8], [-87.8, 23.5], [-88.5, 22.8], [-89.2, 23.2]]]
+        }
+      }
+    ],
+    "hindcast": [
+      {
+        "time": "2024-04-10T14:20:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-89.8, 23.5], [-89.2, 24.0], [-88.5, 23.6], [-89.0, 23.0], [-89.8, 23.5]]]
+        }
+      },
+      {
+        "time": "2024-04-10T16:20:00Z",
+        "polygon": {
+          "type": "Polygon",
+          "coordinates": [[[-89.5, 23.3], [-88.8, 23.7], [-88.0, 23.4], [-88.7, 22.8], [-89.5, 23.3]]]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SAR Oil Spill Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-zinc-950 text-zinc-100 font-sans">
+    <div id="app" class="h-screen flex flex-col">
+      <header class="h-14 border-b border-zinc-800 flex items-center px-4 justify-between shrink-0">
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
+            <svg class="w-6 h-6 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 22h20L12 2z"/>
+              <path d="M12 8v4"/>
+              <path d="M12 16h.01"/>
+            </svg>
+            <h1 class="text-lg font-semibold tracking-tight">SAR Oil Spill</h1>
+          </div>
+          <span class="text-xs text-zinc-500 dark:text-zinc-400 hidden sm:inline">Detection & Attribution Dashboard</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <select id="mock-select" class="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-300 focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <option value="">Select scenario...</option>
+            <option value="run-with-vessels">With Vessels</option>
+            <option value="run-with-drift">With Drift</option>
+            <option value="run-no-alert">No Alert</option>
+          </select>
+          <button id="legend-toggle" class="text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 transition-colors">
+            Legend
+          </button>
+          <button id="clear-btn" class="text-xs px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 hover:bg-zinc-700 transition-colors">
+            Clear
+          </button>
+        </div>
+      </header>
+
+      <div class="flex-1 flex overflow-hidden">
+        <main class="flex-1 relative">
+          <div id="map" class="absolute inset-0"></div>
+
+          <div id="legend" class="absolute bottom-4 left-4 z-[1000] bg-zinc-900/95 backdrop-blur border border-zinc-700 rounded-lg p-3 text-xs space-y-2 hidden">
+            <div class="font-medium text-zinc-200 mb-2">Legend</div>
+            <div class="flex items-center gap-2">
+              <div class="w-3 h-3 rounded bg-red-500/30 border border-red-500"></div>
+              <span class="text-zinc-300">Oil Spill</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-3 h-3 rounded bg-blue-500/30 border border-blue-500"></div>
+              <span class="text-zinc-300">Vessel Track</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-3 h-3 rounded bg-amber-500/30 border border-amber-500 border-dashed"></div>
+              <span class="text-zinc-300">Drift Forecast</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-3 h-3 rounded bg-zinc-500/30 border border-zinc-500 border-dashed"></div>
+              <span class="text-zinc-300">Drift Hindcast</span>
+            </div>
+          </div>
+        </main>
+
+        <aside class="w-80 border-l border-zinc-800 bg-zinc-900/50 flex flex-col overflow-y-auto shrink-0">
+          <div id="alert-badge" class="border-b border-zinc-800"></div>
+          <div id="spill-panel" class="border-b border-zinc-800"></div>
+          <div id="vessel-list" class="border-b border-zinc-800"></div>
+          <div id="drift-timeline"></div>
+        </aside>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
