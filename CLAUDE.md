@@ -34,9 +34,10 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 5.2 AIS anomaly features | `src/attribution/anomaly_features.py` | **done** — gap + speed-change bonus factors, wired into scoring |
 | 5.3 incident report | `src/output/report.py` | **done** — standalone HTML (not PDF), `--report` on the Phase 3-4 chain |
 | 5.4 dashboard | `src/output/dashboard.py` | **done** — FastAPI, one page, toggleable map layers, real-scene verified |
-| 5.5 web API + frontend | `src/api/{main,models,registry}.py`, `frontend/` | **done** — separate FastAPI JSON API + Vite/TS SPA, real-scene verified |
+| 5.5 backend API | `src/api/{main,models,registry}.py` | **done** — FastAPI, 5 endpoints, file-based registry, CORS |
+| 5.6 frontend | `frontend/src/` | **done** — Vite+TS SPA, cobe globe, run list, spill overlay, vessel drawer, real-scene verified |
 
-`pytest` → 486 passing, ~55-60s, fully offline. Run it before believing anything here.
+`pytest` → 496 passing, ~55-60s, fully offline. Run it before believing anything here.
 
 Phase 1 runs end to end: `scripts/run_detection.py --scene <tif> --stub-model`
 takes ~72 s on a 2048² scene. **There is still no trained checkpoint**, so
@@ -96,29 +97,44 @@ Phase 5 is final polish, all four steps independent of each other:
   metadata, the same toggleable map, alert status, ranked vessel table.
   Loads one result once at startup; not wired to the live poller.
 
-- **5.5 web API + frontend** (`src/api/{main,models,registry}.py`,
+- **5.5/5.6 backend API + frontend** (`src/api/{main,models,registry}.py`,
   `frontend/`): a separate FastAPI app from 5.4's `dashboard.py` — this one
   is a pure JSON API (`GET /api/runs`, `GET /api/runs/{id}`, `GET
   /api/runs/{id}/report`, `POST /api/runs`) with no server-rendered HTML,
   meant to be consumed by `frontend/`'s Vite + vanilla TypeScript SPA (no
-  React — plain classes: `App`, `MapView`, `SpillPanel`, `VesselList`,
-  `DriftTimeline`, `AlertBadge`, one page, no router yet). `src/api/
-  registry.py` scans `data/processed/` and translates either a Phase 3
-  `pipeline_result.json` or a Phase-1-only `spills/*.geojson` into the
-  frontend's `PipelineRun` contract (`frontend/src/types/schema.ts` ==
-  `src/api/models.py`, field-for-field, checked by `tests/test_api.py`).
-  CORS is opened for the Vite dev server (5173/5174, both localhost and
-  127.0.0.1); `frontend/vite.config.ts` also proxies `/api` to
-  `localhost:8000` so `frontend/src/api/client.ts` can use relative paths in
-  dev — `VITE_API_BASE_URL` (`frontend/.env`, gitignored;
-  `frontend/.env.example` tracked) overrides this for a build with no dev
-  proxy. MSW is a `package.json` devDependency but was never wired up (no
-  handlers) — the actual offline-demo fallback is simpler: `App.ts`'s
-  dropdown fetches the static fixtures under `frontend/src/mocks/fixtures/`
-  directly when not pointed at a real backend run. **Real-scene verified**
-  (scene `00000`, 304 real spills) via a live `uvicorn` + `npm run dev` pair
-  and a Playwright smoke check — no console errors, real drift/spill/alert
-  data rendered.
+  React). The UI is one full-viewport 3D globe (`SpillGlobe`, `cobe`) with
+  every processed run plotted as a point; selecting one opens `SpillOverlay`
+  (spill detail card) and `VesselDrawer` (ranked candidates), with `RunList`
+  as a collapsible sidebar and a header carrying refresh/clear/report
+  buttons — no `<select>` dropdown, no router. `App.ts::loadAllRuns()` calls
+  `listRuns()` then `getRun()` for every scene up front, so the whole app
+  works off one in-memory `PipelineRun[]`; loading and error states
+  (`#loading-state`/`#error-state`) cover the fetch, with retry and
+  "Load demo data" actions on error. `src/api/registry.py` scans
+  `data/processed/` and translates either a Phase 3 `pipeline_result.json`
+  or a Phase-1-only `spills/*.geojson` into the frontend's `PipelineRun`
+  contract (`frontend/src/types/schema.ts` == `src/api/models.py`,
+  field-for-field, checked by `tests/test_api.py`). CORS is opened for the
+  Vite dev server (5173/5174, both localhost and 127.0.0.1);
+  `frontend/vite.config.ts` also proxies `/api` to `localhost:8000` so
+  `frontend/src/api/client.ts` can use relative paths in dev —
+  `VITE_API_BASE_URL` (`frontend/.env`, gitignored; `frontend/.env.example`
+  tracked) overrides this for a build with no dev proxy, and
+  `client.ts` strips any trailing slash so a value with or without one
+  works. `VITE_USE_MOCKS` (default `false`) gates the only fixture
+  fallback: `App.ts` reaches for `frontend/src/mocks/fixtures/*.json` (or
+  the error state's "Load demo data" button) purely when the real backend
+  is unreachable — real backend only unless that flag is set. MSW is still
+  a `package.json` devDependency but was never wired up (no handlers); the
+  fixture fallback above is unrelated to it. A "Report" button
+  (`#report-btn`, header) appears whenever a run is selected and opens that
+  scene's `GET /api/runs/{id}/report` HTML in a new tab.
+  `frontend/src/components/{MapView,SpillPanel,VesselList,DriftTimeline,
+  AlertBadge}.ts` are leftover from the pre-globe UI — unused by `App.ts`,
+  not deleted, dead code until someone removes them.
+  **Real-scene verified** (scene `00000`, 304 real spills) via a live
+  `uvicorn` + `npm run dev` pair and a Playwright smoke check — no console
+  errors, real drift/spill/alert data rendered, real HTML report opened.
   - A run's alert status has to be picked from *some* spill in the scene
     (`data["spills"]` is a list) and then translated from the backend's raw
     word to the frontend's word — both steps are centralized in
@@ -296,7 +312,7 @@ dashboard-specific code.
 ## Commands
 
 ```bash
-.venv/Scripts/python.exe -m pytest                      # 515 tests, offline
+.venv/Scripts/python.exe -m pytest                      # 496 tests, offline
 .venv/Scripts/python.exe scripts/run_detection.py --scene <tif> --stub-model
 .venv/Scripts/python.exe -m src.detection.train --smoke-test   # end-to-end, no data/GPU
 .venv/Scripts/python.exe scripts/run_attribution.py --spill <geojson> --ais <csv|parquet>
@@ -304,6 +320,17 @@ dashboard-specific code.
 .venv/Scripts/python.exe scripts/run_live.py --aoi configs/aoi.geojson --interval 900   # needs CDSE creds, untested here
 .venv/Scripts/python.exe -m src.output.dashboard --result data/processed/<scene_id>/pipeline_result.json
 ```
+
+### Frontend
+
+```bash
+cd frontend && npm run dev      # Vite dev server at localhost:5173, proxies /api -> :8000
+cd frontend && npm run build    # production build to frontend/dist/
+```
+
+Backend API: `src/api/main.py` — `uvicorn src.api.main:app --host 0.0.0.0 --port 8000`.
+Endpoints: `GET /api/runs`, `GET /api/runs/:id`, `GET /api/runs/:id/report`,
+`POST /api/runs`, `GET /api/health`.
 
 ```python
 from src.ingestion import LocalSceneSource, load_aoi
@@ -319,53 +346,23 @@ A full backend review (all phases, no code changes) rated the backend **7/10
 — functionally complete, not yet demo/production-hardened**. Architecture and
 phase boundaries were confirmed clean; a frontend can be built against the
 combined-JSON contract (`spill`/`alert`/`vessels`/`drift_forecast`) as-is.
-Findings not yet fixed, in priority order:
 
-**Must fix**
-- `requirements.txt` is missing `httpx` — `tests/test_dashboard.py` only
-  collects today because `huggingface_hub` happens to pull it in transitively;
-  a clean install breaks the test suite.
-- No dependency version pins — a live `numpy`/C-extension ABI warning already
-  appears in `test_env_currents.py`; pin at least `numpy`, `netCDF4`,
-  `rasterio`, `shapely`, `pandas`, `torch`.
-- `src/output/map.py`'s popups/tooltips (`_spill_popup`, `_vessel_popup`,
-  `_forecast_popup`) don't `html.escape()` their values, unlike
-  `report.py`/`dashboard.py` which do — a vessel_name from an AIS export
-  renders raw HTML in the map.
+**Must fix** — all three resolved (commit `1197081`):
+- `requirements.txt` missing `httpx` — **fixed**.
+- No dependency version pins — **fixed**.
+- `src/output/map.py` popups lack `html.escape()` — **fixed**.
 
-**Should fix**
-- `src/drift/particle_model.py::scatter_particles()`'s rejection-sampling
-  loop hangs forever on a degenerate/zero-area geometry (verified: a
-  `LineString` input never returns). Unreachable from the real pipeline today
-  (`mask_to_polygon()` never produces one), but a real risk the moment a
-  frontend lets a caller supply a hand-edited polygon.
-- `scripts/run_live.py`: `poll_once()`/`CDSECatalogue.search()` isn't inside
-  the per-scene try/except (only `run_pipeline.run()` is) — one network
-  failure permanently kills the "continuous" poller. Also `since` advances
-  even when a scene's pipeline run failed, so that scene is never retried.
-- `src/output/dashboard.py`'s `GET /` rebuilds the whole map and recomputes
-  every alerted spill's hindcast corridor on every request, not once at
-  startup; one malformed spill's `hindcast_origin()` call (uncaught) would
-  500 the entire page on every reload.
-- `src/detection/infer.py::db_to_model_input()` collapses a real 2-band
-  VH/VV tile to band-0-repeated-3x instead of using both bands — fix before
-  any real training run (currently invisible, no checkpoint exists yet).
-- Wind-gated look-alike rejection (`lookalike_filter.py::classify_blob()`)
-  is fully built and tested but `scripts/run_detection.py` never passes
-  `wind_speed=` — dead in the real run path. Wire it or note it here as
-  intentionally unwired.
-- `scripts/run_pipeline.py`'s `with SpillRegistry(...) as registry:` block
-  (around line 125) holds the sqlite connection open across per-spill drift
-  forecasting and AIS attribution, not just registry reads/writes — risks a
-  lock timeout if two processes (e.g. the live poller + a manual run) hit the
-  same registry file concurrently. `evaluate_alert()`'s dedup check-then-act
-  is also a non-atomic read+write race under concurrent writers.
-- `SpillRegistry` (`src/alerts/registry.py`) has no direct unit tests — only
-  exercised indirectly via `evaluate_alert`/`process_spill`.
-- `src/attribution/anomaly_features.py::speed_change_score()` divides by
-  `baseline` after only checking `baseline < min_baseline_speed_knots` — if
-  that config field is ever set to `0.0` and baseline is exactly `0.0`,
-  `ZeroDivisionError`.
+**Should fix** — resolved:
+- `scatter_particles()` hangs on zero-area geometry — **fixed** (raises `ValueError`).
+- `run_live.py` `poll_once()` not in try/except; `since` advances on failure — **fixed**.
+- `dashboard.py` rebuilds map + hindcast per-request — **fixed** (cached at startup).
+- `db_to_model_input()` collapses 2-band to band-0-repeated — **fixed** (uses both VH+VV).
+- Wind-gated look-alike rejection unwired — **fixed** (`run_detection.py` now calls `get_wind()`).
+- `run_pipeline.py` holds sqlite open across drift/AIS — **fixed** (narrowed to `process_spill` only).
+- `SpillRegistry` no direct unit tests — **fixed** (`tests/test_registry.py`).
+- `speed_change_score()` division-by-zero — **fixed** (guard added for `baseline == 0.0`).
+
+**Should fix** — still open:
 - `src/ais/query.py` and `src/ais/filter.py` use unvectorized per-row Python
   loops (`.apply(axis=1)`, a list comprehension over `.distance()`) for
   AIS-point-in-area and CPA-distance — fine at every AIS export size used so

@@ -122,46 +122,46 @@ def run(
         print("      no --ais given: alerted spills will have an empty vessel list")
 
     max_printed = 10
-    with SpillRegistry(path=registry_path, settings=settings) as registry:
-        results: List[Dict[str, Any]] = []
-        alerted_count = 0
-        for index, spill in enumerate(spills):
+    results: List[Dict[str, Any]] = []
+    alerted_count = 0
+    for index, spill in enumerate(spills):
+        with SpillRegistry(path=registry_path, settings=settings) as registry:
             decision = process_spill(spill, registry, settings=settings)
-            if decision.alert:
-                alerted_count += 1
-            if index < max_printed:
-                failed = [r.name for r in decision.rules if not r.passed]
-                print(
-                    f"      {decision.spill_id or '(rejected)'}: {decision.status}"
-                    + (f" <- {', '.join(failed)}" if failed else "")
-                )
+        if decision.alert:
+            alerted_count += 1
+        if index < max_printed:
+            failed = [r.name for r in decision.rules if not r.passed]
+            print(
+                f"      {decision.spill_id or '(rejected)'}: {decision.status}"
+                + (f" <- {', '.join(failed)}" if failed else "")
+            )
 
-            vessels: List[Dict[str, Any]] = []
-            if decision.alert and ais is not None:
-                hindcast_corridor = (
-                    hindcast_origin(spill, settings=settings)
-                    if settings.attribution.use_hindcasting else None
-                )
-                attribution = run_attribution.attribute_spill(
-                    spill, ais, settings=settings, hindcast_corridor=hindcast_corridor,
-                )
-                vessels = attribution["candidates"]
-            elif decision.alert:
-                logger.info(
-                    "spill %s alerted but no --ais given; vessel list left empty",
-                    decision.spill_id,
-                )
+        vessels: List[Dict[str, Any]] = []
+        if decision.alert and ais is not None:
+            hindcast_corridor = (
+                hindcast_origin(spill, settings=settings)
+                if settings.attribution.use_hindcasting else None
+            )
+            attribution = run_attribution.attribute_spill(
+                spill, ais, settings=settings, hindcast_corridor=hindcast_corridor,
+            )
+            vessels = attribution["candidates"]
+        elif decision.alert:
+            logger.info(
+                "spill %s alerted but no --ais given; vessel list left empty",
+                decision.spill_id,
+            )
 
-            drift_forecast = _drift_forecast_payload(spill, settings)
-            results.append({
-                "spill": spill, "alert": decision.to_dict(), "vessels": vessels,
-                "drift_forecast": drift_forecast,
-            })
+        drift_forecast = _drift_forecast_payload(spill, settings)
+        results.append({
+            "spill": spill, "alert": decision.to_dict(), "vessels": vessels,
+            "drift_forecast": drift_forecast,
+        })
 
-        if len(spills) > max_printed:
-            print(f"      ... {len(spills) - max_printed} more spill(s) evaluated")
-        print(f"      {alerted_count} of {len(spills)} spill(s) alerted")
-        print(f"[4.3] drift forecast computed for {len(spills)} spill(s) (6/12/24/48h)")
+    if len(spills) > max_printed:
+        print(f"      ... {len(spills) - max_printed} more spill(s) evaluated")
+    print(f"      {alerted_count} of {len(spills)} spill(s) alerted")
+    print(f"[4.3] drift forecast computed for {len(spills)} spill(s) (6/12/24/48h)")
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),

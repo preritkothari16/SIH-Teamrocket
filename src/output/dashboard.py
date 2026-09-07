@@ -171,22 +171,46 @@ def render_dashboard_html(result: Dict[str, Any], settings: Optional[Settings] =
 def create_app(result_path: Path, settings: Optional[Settings] = None) -> FastAPI:
     """A FastAPI app serving ``result_path``'s pipeline output at ``/``.
 
-    The result is loaded once, here, at app-construction time - reloading it
-    per request would let a stale/partial file being rewritten by a
-    concurrent pipeline run corrupt an in-flight page load, and this is a
-    single-run demo tool, not a live-refreshing one (see step 5.1's poller
-    for the live side; wiring that up to this dashboard is future work).
+    The result and its derived map/hindcast are loaded and computed once at
+    app-construction time — not per-request — so a malformed spill's
+    ``hindcast_origin()`` call cannot 500 the page on every reload, and
+    repeated page loads are instant.
     """
     settings = settings or get_settings()
     result = json.loads(Path(result_path).read_text(encoding="utf-8"))
+    corridors = hindcast_corridors_for(result, settings)
+    cached_map_html = build_map(result, hindcast_corridors=corridors)._repr_html_()
 
     app = FastAPI(title="SAR oil-spill dashboard")
 
     @app.get("/", response_class=HTMLResponse)
     def dashboard() -> str:
-        return render_dashboard_html(result, settings=settings)
+        return _render(result, cached_map_html)
 
     return app
+
+
+def _render(result: Dict[str, Any], map_html: str) -> str:
+    """The dashboard's one page, as a complete HTML string."""
+    return f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SAR oil-spill dashboard</title>
+<style>{STYLE}</style>
+</head>
+<body>
+<h1>SAR oil-spill dashboard</h1>
+<div class="meta">{_metadata_html(result)}</div>
+<h2>Map</h2>
+{map_html}
+<h2>Alert status</h2>
+{_alert_status_html(result)}
+<h2>Ranked candidate vessels</h2>
+{_vessel_rows(result)}
+</body>
+</html>
+"""
 
 
 def build_parser() -> argparse.ArgumentParser:

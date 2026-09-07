@@ -1,119 +1,181 @@
-import { MapView } from './components/MapView';
-import { SpillPanel } from './components/SpillPanel';
-import { VesselList } from './components/VesselList';
-import { DriftTimeline } from './components/DriftTimeline';
-import { AlertBadge } from './components/AlertBadge';
-import { listRuns, getRun, getReport, checkHealth } from './api/client';
+import { SpillGlobe } from './components/ui/SpillGlobe';
+import { RunList } from './components/RunList';
+import { SpillOverlay } from './components/SpillOverlay';
+import { VesselDrawer } from './components/VesselDrawer';
+import { listRuns, getRun, getReport } from './api/client';
 import type { PipelineRun } from './types/schema';
 
+const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
+
 export class App {
-  private map: MapView;
-  private spillPanel: SpillPanel;
-  private vesselList: VesselList;
-  private driftTimeline: DriftTimeline;
-  private alertBadge: AlertBadge;
-  private apiAvailable = false;
-  private currentSceneId: string | null = null;
+  private globe: SpillGlobe;
+  private runList: RunList;
+  private spillOverlay: SpillOverlay;
+  private vesselDrawer: VesselDrawer;
+  private allRuns: PipelineRun[] = [];
+
+  private runListPanel: HTMLElement;
+  private runListToggle: HTMLElement;
+  private globeHint: HTMLElement;
+  private loadingEl: HTMLElement;
+  private errorEl: HTMLElement;
+  private reportBtn: HTMLButtonElement;
+  private selectedSceneId: string | null = null;
 
   constructor() {
-    const mapEl = document.getElementById('map')!;
-    const spillEl = document.getElementById('spill-panel')!;
-    const vesselEl = document.getElementById('vessel-list')!;
-    const driftEl = document.getElementById('drift-timeline')!;
-    const alertEl = document.getElementById('alert-badge')!;
+    const globeCanvas = document.getElementById('globe-canvas') as HTMLCanvasElement;
+    const runListEl = document.getElementById('run-list')!;
+    const overlayEl = document.getElementById('spill-overlay')!;
+    const drawerEl = document.getElementById('vessel-drawer')!;
+    const drawerContentEl = document.getElementById('vessel-drawer-content')!;
+    const drawerCloseBtn = document.getElementById('vessel-drawer-close')!;
+    this.runListPanel = document.getElementById('run-list-panel')!;
+    this.runListToggle = document.getElementById('run-list-toggle')!;
+    this.globeHint = document.getElementById('globe-hint')!;
+    this.loadingEl = document.getElementById('loading-state')!;
+    this.errorEl = document.getElementById('error-state')!;
+    this.reportBtn = document.getElementById('report-btn') as HTMLButtonElement;
 
-    this.map = new MapView(mapEl);
-    this.spillPanel = new SpillPanel(spillEl);
-    this.vesselList = new VesselList(vesselEl, (mmsi: string) => this.map.highlightVessel(mmsi));
-    this.driftTimeline = new DriftTimeline(driftEl);
-    this.alertBadge = new AlertBadge(alertEl);
+    this.globe = new SpillGlobe(globeCanvas, (runId: string | null) => {
+      this.selectRun(runId);
+    });
+
+    this.runList = new RunList(runListEl, (runId: string | null) => {
+      this.selectRun(runId);
+    });
+
+    this.spillOverlay = new SpillOverlay(overlayEl);
+    this.vesselDrawer = new VesselDrawer(drawerEl, drawerContentEl, drawerCloseBtn);
 
     this.init();
   }
 
   private async init(): Promise<void> {
-    await this.checkApi();
-    this.populateDropdown();
-    this.setupSelector();
-    this.setupLegendToggle();
     this.setupClearButton();
+    this.setupRunListToggle();
+    this.setupResponsive();
+    this.setupRefreshButton();
+    this.setupErrorButtons();
     this.setupReportButton();
+    await this.loadAllRuns();
   }
 
-  private async checkApi(): Promise<void> {
-    this.apiAvailable = await checkHealth();
-  }
-
-  private populateDropdown(): void {
-    const select = document.getElementById('mock-select') as HTMLSelectElement;
-    if (!select) return;
-
-    if (this.apiAvailable) {
-      // Fetch real runs from the API and populate the dropdown
-      listRuns().then((runs) => {
-        if (runs.length > 0) {
-          // Add a separator comment
-          const optgroup = document.createElement('optgroup');
-          optgroup.label = 'Backend runs';
-          runs.forEach((run) => {
-            const opt = document.createElement('option');
-            opt.value = `api:${run.scene_id}`;
-            opt.textContent = `${run.scene_id} (${run.area_km2.toFixed(1)} km²)`;
-            optgroup.appendChild(opt);
-          });
-          select.insertBefore(optgroup, select.firstChild);
-        }
-      }).catch(() => {
-        // API not reachable — mock options remain
-      });
+  private setState(state: 'loading' | 'error' | 'ready', errorMsg?: string): void {
+    this.loadingEl.style.display = state === 'loading' ? 'flex' : 'none';
+    this.errorEl.style.display = state === 'error' ? 'flex' : 'none';
+    if (state === 'error' && errorMsg) {
+      this.errorEl.querySelector('.error-message')!.textContent = errorMsg;
     }
   }
 
-  private setupSelector(): void {
-    const select = document.getElementById('mock-select') as HTMLSelectElement;
-    if (!select) return;
+  private async loadAllRuns(): Promise<void> {
+    this.setState('loading');
 
-    select.addEventListener('change', async () => {
-      const value = select.value;
-      if (!value) {
-        this.clear();
+    try {
+      const apiRuns = await listRuns();
+      if (apiRuns.length > 0) {
+        const full = await Promise.all(apiRuns.map((r) => getRun(r.scene_id)));
+        this.allRuns = full;
+      } else {
+        this.allRuns = [];
+      }
+    } catch (err) {
+      if (USE_MOCKS) {
+        // Fixture fallback only when VITE_USE_MOCKS=true
+        console.warn('[App] API unreachable, loading fixtures:', err);
+        await this.loadFixtures();
+      } else {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.setState('error', msg);
         return;
       }
+    }
 
-      if (value.startsWith('api:')) {
-        // Real backend run
-        const sceneId = value.slice(4);
+    this.setState('ready');
+    this.globe.init(this.allRuns);
+    this.runList.render(this.allRuns);
+  }
+
+  private async loadFixtures(): Promise<void> {
+    const fixtureNames = ['run-with-vessels', 'run-with-drift', 'run-no-alert'];
+    const loaded = await Promise.all(
+      fixtureNames.map(async (name) => {
         try {
-          const data = await getRun(sceneId);
-          this.currentSceneId = sceneId;
-          this.updateReportButton();
-          this.loadRun(data);
-        } catch (err) {
-          console.error('Failed to load run from API:', err);
+          const res = await fetch(`/src/mocks/fixtures/${name}.json`);
+          return (await res.json()) as PipelineRun;
+        } catch {
+          return null;
         }
-      } else {
-        // Mock fixture — no backend-generated report to export
-        this.currentSceneId = null;
-        this.updateReportButton();
-        try {
-          const response = await fetch(`/src/mocks/fixtures/${value}.json`);
-          const data: PipelineRun = await response.json();
-          this.loadRun(data);
-        } catch (err) {
-          console.error('Failed to load mock data:', err);
-        }
-      }
+      }),
+    );
+    this.allRuns = loaded.filter((r): r is PipelineRun => r !== null);
+  }
+
+  private selectRun(runId: string | null): void {
+    this.globe.selectSpill(runId);
+    this.runList.setSelected(runId);
+
+    if (runId === null) {
+      this.spillOverlay.render(null);
+      this.vesselDrawer.close();
+      this.globeHint.style.opacity = '1';
+      this.selectedSceneId = null;
+      this.reportBtn.hidden = true;
+      return;
+    }
+
+    const run = this.allRuns.find(
+      (r) => (r.alert?.spill_id ?? r.spill.scene_id) === runId,
+    );
+    if (!run) return;
+
+    this.spillOverlay.render(run);
+    this.vesselDrawer.render(run.vessels);
+    this.globeHint.style.opacity = '0';
+    this.selectedSceneId = run.spill.scene_id;
+    this.reportBtn.hidden = false;
+
+    // On mobile, close the run list panel after selection
+    if (window.innerWidth < 1024) {
+      this.runListPanel.classList.add('-translate-x-full');
+    }
+  }
+
+  private setupClearButton(): void {
+    const btn = document.getElementById('clear-btn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      this.selectRun(null);
+    });
+  }
+
+  private setupRefreshButton(): void {
+    const btn = document.getElementById('refresh-btn');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      btn.classList.add('animate-spin');
+      await this.loadAllRuns();
+      btn.classList.remove('animate-spin');
+    });
+  }
+
+  private setupErrorButtons(): void {
+    const retryBtn = document.getElementById('error-retry-btn');
+    const mockBtn = document.getElementById('error-mock-btn');
+    retryBtn?.addEventListener('click', () => this.loadAllRuns());
+    mockBtn?.addEventListener('click', async () => {
+      await this.loadFixtures();
+      this.setState('ready');
+      this.globe.init(this.allRuns);
+      this.runList.render(this.allRuns);
     });
   }
 
   private setupReportButton(): void {
-    const btn = document.getElementById('report-btn');
-    if (!btn) return;
-
-    btn.addEventListener('click', async () => {
-      if (!this.currentSceneId) return;
+    this.reportBtn.addEventListener('click', async () => {
+      if (!this.selectedSceneId) return;
       try {
-        const blob = await getReport(this.currentSceneId);
+        const blob = await getReport(this.selectedSceneId);
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank');
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -123,56 +185,33 @@ export class App {
     });
   }
 
-  private updateReportButton(): void {
-    const btn = document.getElementById('report-btn') as HTMLButtonElement | null;
-    if (!btn) return;
-    btn.hidden = !this.currentSceneId;
-  }
-
-  private setupLegendToggle(): void {
-    const btn = document.getElementById('legend-toggle');
-    const legend = document.getElementById('legend');
-    if (!btn || !legend) return;
-
-    btn.addEventListener('click', () => {
-      legend.classList.toggle('hidden');
+  private setupRunListToggle(): void {
+    this.runListToggle.addEventListener('click', () => {
+      this.runListPanel.classList.toggle('-translate-x-full');
     });
   }
 
-  private setupClearButton(): void {
-    const btn = document.getElementById('clear-btn');
-    if (!btn) return;
+  private setupResponsive(): void {
+    const mq = window.matchMedia('(max-width: 1023px)');
 
-    btn.addEventListener('click', () => {
-      this.clear();
-      this.currentSceneId = null;
-      this.updateReportButton();
-      const select = document.getElementById('mock-select') as HTMLSelectElement;
-      if (select) select.value = '';
-    });
-  }
+    const applyBreakpoint = (matches: boolean) => {
+      if (matches) {
+        this.runListToggle.classList.remove('hidden');
+        this.runListPanel.classList.add('-translate-x-full');
+      } else {
+        this.runListToggle.classList.add('hidden');
+        this.runListPanel.classList.remove('-translate-x-full');
+      }
+    };
 
-  loadRun(run: PipelineRun): void {
-    this.map.setSpill(run.spill);
-    this.spillPanel.render(run.spill);
-    this.vesselList.render(run.vessels);
-    this.driftTimeline.render(run.drift, run.drift);
-    this.alertBadge.render(run.alert);
-  }
-
-  clear(): void {
-    this.map.clear();
-    this.spillPanel.render(null);
-    this.vesselList.render([]);
-    this.driftTimeline.render({ forecast: [] }, { hindcast: [] });
-    this.alertBadge.render(null);
+    applyBreakpoint(mq.matches);
+    mq.addEventListener('change', (e) => applyBreakpoint(e.matches));
   }
 
   destroy(): void {
-    this.map.destroy();
-    this.spillPanel.destroy();
-    this.vesselList.destroy();
-    this.driftTimeline.destroy();
-    this.alertBadge.destroy();
+    this.globe.destroy();
+    this.runList.destroy();
+    this.spillOverlay.destroy();
+    this.vesselDrawer.destroy();
   }
 }
