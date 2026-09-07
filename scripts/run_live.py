@@ -75,12 +75,20 @@ def run_forever(
     cycle = 0
     while max_cycles is None or cycle < max_cycles:
         cycle += 1
-        result = poll_once(aoi, since, catalogue=catalogue, settings=settings)
+        try:
+            result = poll_once(aoi, since, catalogue=catalogue, settings=settings)
+        except Exception:
+            logger.exception("poll failed (cycle %d); retrying next interval", cycle)
+            if max_cycles is None or cycle < max_cycles:
+                time.sleep(interval_seconds)
+            continue
+
         print(
             f"[5.1] poll {cycle}: {len(result.new_scenes)} new scene(s) "
             f"since {since.isoformat()}"
         )
 
+        all_succeeded = True
         for scene in result.new_scenes:
             print(f"[5.1] running pipeline for scene {scene.scene_id}")
             try:
@@ -91,13 +99,15 @@ def run_forever(
                 )
                 total_processed += 1
             except Exception:
+                all_succeeded = False
                 logger.exception(
-                    "pipeline failed for scene %s; continuing to the next poll",
+                    "pipeline failed for scene %s; will retry on next poll",
                     scene.scene_id,
                 )
 
-        since = result.checked_at
-        save_last_checked(state_path, since)
+        if all_succeeded:
+            since = result.checked_at
+            save_last_checked(state_path, since)
 
         if max_cycles is None or cycle < max_cycles:
             time.sleep(interval_seconds)

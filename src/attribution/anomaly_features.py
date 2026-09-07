@@ -95,7 +95,7 @@ def speed_change_score(
         return 0.0, None, None
 
     baseline = float(reported["sog"].median())
-    if baseline < min_baseline_speed_knots:
+    if baseline < min_baseline_speed_knots or baseline == 0.0:
         return 0.0, baseline, None
 
     cpa_ts = pd.Timestamp(cpa_time)

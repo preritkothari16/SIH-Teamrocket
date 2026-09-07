@@ -52,6 +52,8 @@ from src.detection.infer import (  # noqa: E402
     stitch_backscatter,
 )
 from src.detection.lookalike_filter import filter_lookalikes  # noqa: E402
+from src.env_data.wind import get_wind  # noqa: E402
+from src.env_data.grid import EnvDataError  # noqa: E402
 from src.ingestion.local_source import LocalSceneSource  # noqa: E402
 from src.ingestion.types import Scene  # noqa: E402
 from src.preprocessing.pipeline import run_pipeline  # noqa: E402
@@ -157,8 +159,19 @@ def run(
     )
 
     backscatter = stitch_backscatter(scene_dir, grid=result.grid)
+    wind_speed: Optional[float] = None
+    try:
+        centroid = scene.footprint.centroid
+        wind_data = get_wind(
+            centroid.y, centroid.x, scene.acquisition_time, settings=settings,
+        )
+        if wind_data is not None:
+            wind_speed = wind_data.speed_ms
+    except (EnvDataError, Exception):
+        pass  # unavailable wind is a fact, not an error
     filtered = filter_lookalikes(
-        result.mask, backscatter, confidence=result.confidence, settings=settings
+        result.mask, backscatter, confidence=result.confidence,
+        wind_speed=wind_speed, settings=settings,
     )
     print(f"[1.5] {filtered.summary()}")
 

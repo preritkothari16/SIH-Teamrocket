@@ -187,7 +187,12 @@ def db_to_model_input(
 
     bands = scaled.shape[0]
     if bands < in_channels:
-        scaled = np.repeat(scaled[:1], in_channels, axis=0)
+        # For 2-band (VH/VV) tiles with a 3-channel model, repeat the
+        # second band (VV) rather than the first — VV carries more oil
+        # contrast. For 1-band tiles, repeat what we have.
+        repeat_band = scaled[min(1, bands - 1):min(1, bands - 1) + 1]
+        padding = np.repeat(repeat_band, in_channels - bands, axis=0)
+        scaled = np.vstack([scaled, padding])
     elif bands > in_channels:
         scaled = scaled[:in_channels]
 

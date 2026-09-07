@@ -66,6 +66,12 @@ def scatter_particles(
     n_particles = n_particles if n_particles is not None else settings.drift.n_particles
     rng = rng or np.random.default_rng()
 
+    if polygon.is_empty or polygon.area == 0:
+        raise ValueError(
+            "scatter_particles requires a non-empty polygon with area > 0; "
+            f"got {polygon.geom_type} with area {polygon.area}"
+        )
+
     min_lon, min_lat, max_lon, max_lat = polygon.bounds
     accepted = np.empty((0, 2))
     # A thin/elongated slick polygon can fill only a small fraction of its
