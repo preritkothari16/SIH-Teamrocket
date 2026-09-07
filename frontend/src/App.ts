@@ -3,7 +3,7 @@ import { SpillPanel } from './components/SpillPanel';
 import { VesselList } from './components/VesselList';
 import { DriftTimeline } from './components/DriftTimeline';
 import { AlertBadge } from './components/AlertBadge';
-import { listRuns, getRun } from './api/client';
+import { listRuns, getRun, checkHealth } from './api/client';
 import type { PipelineRun } from './types/schema';
 
 export class App {
@@ -39,12 +39,7 @@ export class App {
   }
 
   private async checkApi(): Promise<void> {
-    try {
-      const res = await fetch('/api/health');
-      this.apiAvailable = res.ok;
-    } catch {
-      this.apiAvailable = false;
-    }
+    this.apiAvailable = await checkHealth();
   }
 
   private populateDropdown(): void {

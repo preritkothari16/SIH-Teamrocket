@@ -88,10 +88,45 @@ def list_runs(settings: Optional[Settings] = None) -> List[Dict[str, Any]]:
     return summaries
 
 
+#: Backend ``AlertDecision.status`` (see ``src/alerts/manager.py``) is always
+#: one of "active"/"possible"/"rejected". The frontend contract's status
+#: vocabulary is richer ("new"/"update"/"possible"/"none" — "update" reserved
+#: for a future re-detection-of-an-existing-spill case, not produced by this
+#: mapping yet). Both the list endpoint and the detail endpoint must run a
+#: spill's raw status through this *same* mapping — they disagreed before
+#: because only the detail endpoint did.
+_STATUS_MAP = {
+    "active": "new",
+    "possible": "possible",
+    "rejected": "none",
+}
+
+
+def _map_alert_status(backend_status: Optional[str]) -> str:
+    """Backend raw status word -> frontend contract status word."""
+    return _STATUS_MAP.get(backend_status, "none")
+
+
+def _select_target_spill(spills: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Pick the spill a run's top-level status/summary should reflect.
+
+    Prefers the first *alerted* spill over ``spills[0]`` — an alert firing on
+    any spill in the scene matters more than array order. Falls back to
+    ``spills[0]`` when none are alerted. Shared by the list endpoint
+    (:func:`_summary_from_pipeline`) and the detail endpoint
+    (:func:`_pipeline_to_contract`) so they can't drift apart again.
+    """
+    target = spills[0]
+    for s in spills:
+        if s.get("alert", {}).get("alert"):
+            return s
+    return target
+
+
 def _summary_from_pipeline(data: Dict[str, Any], scene_id: str) -> Dict[str, Any]:
     spills = data.get("spills", [])
     if spills:
-        first = spills[0]
+        first = _select_target_spill(spills)
         spill_props = first.get("spill", {}).get("properties", {})
         alert = first.get("alert", {})
         total_area = sum(
@@ -103,7 +138,7 @@ def _summary_from_pipeline(data: Dict[str, Any], scene_id: str) -> Dict[str, Any
             "acquisition_timestamp": spill_props.get("acquisition_timestamp"),
             "area_km2": round(total_area, 4),
             "confidence": round(spill_props.get("mean_confidence") or 0.0, 4),
-            "alert_status": alert.get("status", "none"),
+            "alert_status": _map_alert_status(alert.get("status")),
         }
     return {
         "scene_id": scene_id,
@@ -199,13 +234,7 @@ def _pipeline_to_contract(
     if not spills:
         return _empty_contract(scene_id, data.get("generated_at", ""))
 
-    # Prefer an alerted spill
-    target = spills[0]
-    for s in spills:
-        if s.get("alert", {}).get("alert"):
-            target = s
-            break
-
+    target = _select_target_spill(spills)
     return _spill_entry_to_contract(target, scene_id)
 
 
@@ -234,14 +263,7 @@ def _spill_entry_to_contract(
         "elongation": props.get("elongation") or 1.0,
     }
 
-    # Map backend alert status to frontend status
-    backend_status = alert_raw.get("status", "none")
-    status_map = {
-        "active": "new",
-        "possible": "possible",
-        "rejected": "none",
-    }
-    frontend_status = status_map.get(backend_status, "none")
+    frontend_status = _map_alert_status(alert_raw.get("status"))
 
     # rules_fired = names of rules that did NOT pass
     rules_raw = alert_raw.get("rules", [])
@@ -285,8 +307,21 @@ def _spill_entry_to_contract(
         "spill": spill,
         "alert": alert,
         "vessels": vessels,
-        "drift": {"forecast": [], "hindcast": []},
+        "drift": {"forecast": _forecast_to_contract(entry.get("drift_forecast", [])), "hindcast": []},
     }
+
+
+def _forecast_to_contract(drift_forecast: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """``run_pipeline.py``'s ``drift_forecast`` (``hours_elapsed``/``time``/``polygon``)
+    to the frontend's ``ForecastEntry`` (``hours``/``time``/``polygon``)."""
+    return [
+        {
+            "hours": round(f["hours_elapsed"]),
+            "time": f["time"],
+            "polygon": f["polygon"],
+        }
+        for f in drift_forecast
+    ]
 
 
 # --------------------------------------------------------------------------- #

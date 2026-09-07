@@ -34,8 +34,9 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 5.2 AIS anomaly features | `src/attribution/anomaly_features.py` | **done** — gap + speed-change bonus factors, wired into scoring |
 | 5.3 incident report | `src/output/report.py` | **done** — standalone HTML (not PDF), `--report` on the Phase 3-4 chain |
 | 5.4 dashboard | `src/output/dashboard.py` | **done** — FastAPI, one page, toggleable map layers, real-scene verified |
+| 5.5 web API + frontend | `src/api/{main,models,registry}.py`, `frontend/` | **done** — separate FastAPI JSON API + Vite/TS SPA, real-scene verified |
 
-`pytest` → 515 passing, ~55-60s, fully offline. Run it before believing anything here.
+`pytest` → 486 passing, ~55-60s, fully offline. Run it before believing anything here.
 
 Phase 1 runs end to end: `scripts/run_detection.py --scene <tif> --stub-model`
 takes ~72 s on a 2048² scene. **There is still no trained checkpoint**, so
@@ -94,6 +95,49 @@ Phase 5 is final polish, all four steps independent of each other:
   `python -m src.output.dashboard --result <pipeline_result.json>` —
   metadata, the same toggleable map, alert status, ranked vessel table.
   Loads one result once at startup; not wired to the live poller.
+
+- **5.5 web API + frontend** (`src/api/{main,models,registry}.py`,
+  `frontend/`): a separate FastAPI app from 5.4's `dashboard.py` — this one
+  is a pure JSON API (`GET /api/runs`, `GET /api/runs/{id}`, `GET
+  /api/runs/{id}/report`, `POST /api/runs`) with no server-rendered HTML,
+  meant to be consumed by `frontend/`'s Vite + vanilla TypeScript SPA (no
+  React — plain classes: `App`, `MapView`, `SpillPanel`, `VesselList`,
+  `DriftTimeline`, `AlertBadge`, one page, no router yet). `src/api/
+  registry.py` scans `data/processed/` and translates either a Phase 3
+  `pipeline_result.json` or a Phase-1-only `spills/*.geojson` into the
+  frontend's `PipelineRun` contract (`frontend/src/types/schema.ts` ==
+  `src/api/models.py`, field-for-field, checked by `tests/test_api.py`).
+  CORS is opened for the Vite dev server (5173/5174, both localhost and
+  127.0.0.1); `frontend/vite.config.ts` also proxies `/api` to
+  `localhost:8000` so `frontend/src/api/client.ts` can use relative paths in
+  dev — `VITE_API_BASE_URL` (`frontend/.env`, gitignored;
+  `frontend/.env.example` tracked) overrides this for a build with no dev
+  proxy. MSW is a `package.json` devDependency but was never wired up (no
+  handlers) — the actual offline-demo fallback is simpler: `App.ts`'s
+  dropdown fetches the static fixtures under `frontend/src/mocks/fixtures/`
+  directly when not pointed at a real backend run. **Real-scene verified**
+  (scene `00000`, 304 real spills) via a live `uvicorn` + `npm run dev` pair
+  and a Playwright smoke check — no console errors, real drift/spill/alert
+  data rendered.
+  - A run's alert status has to be picked from *some* spill in the scene
+    (`data["spills"]` is a list) and then translated from the backend's raw
+    word to the frontend's word — both steps are centralized in
+    `registry.py` specifically because they drifted apart once already:
+    `_select_target_spill()` (prefers the first *alerted* spill over
+    `spills[0]` — an alert firing anywhere in the scene matters more than
+    array order) and `_map_alert_status()` (`active`→`new`, `possible`→
+    `possible`, `rejected`→`none`; frontend's `"update"` word is reserved
+    for a future re-detection case, not produced yet). **Both**
+    `GET /api/runs` (`_summary_from_pipeline`) and `GET /api/runs/{id}`
+    (`_pipeline_to_contract` → `_spill_entry_to_contract`) call both
+    helpers — don't let a third code path reimplement either rule inline.
+  - The real local dataset (scene `00000`) only ever produces raw statuses
+    `"rejected"` (303/304 spills) and `"possible"` (1/304) — `"active"`
+    requires `alerts/manager.py`'s wind-speed check to actually pass, which
+    needs real wind data this environment doesn't have. Don't take that as
+    "the active/new case can't happen" — it's reachable by design the
+    moment real wind data is, and `tests/test_api.py::TestStatusWordConsistency`
+    covers all three words synthetically since the real dataset can't.
 
 `src/output/map.py::build_map()` underlies all three of 4.5/5.3/5.4: slick,
 drift forecast, hindcast corridor (compute-on-demand, never persisted in the

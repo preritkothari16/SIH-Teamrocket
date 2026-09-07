@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
-from src.api.registry import _geojson_to_contract
+from src.api.registry import _geojson_to_contract, _pipeline_to_contract, _select_target_spill
 from src.config import Settings
 
 client = TestClient(app)
@@ -158,6 +158,176 @@ class TestShapeTranslation:
         assert run["spill"]["scene_id"] == "empty_scene"
         assert run["spill"]["area_km2"] == 0.0
         assert run["vessels"] == []
+
+
+# --------------------------------------------------------------------------- #
+# Shape translation: Phase 3 pipeline_result.json -> frontend PipelineRun
+# --------------------------------------------------------------------------- #
+SAMPLE_PIPELINE_RESULT: Dict[str, Any] = {
+    "generated_at": "2024-04-10T14:30:00+00:00",
+    "scene_id": SCENE_ID,
+    "spills": [
+        {
+            "spill": SAMPLE_FEATURE,
+            "alert": {
+                "spill_id": "test_scene_001_spill_001",
+                "alert": True,
+                "status": "active",
+                "rules": [{"name": "confidence_rule", "passed": True}],
+                "last_updated": "2024-04-10T14:40:00+00:00",
+            },
+            "vessels": [
+                {
+                    "mmsi": "367123452",
+                    "vessel_name": "TANKER Gamma",
+                    "vessel_type": "tanker",
+                    "score": 0.88,
+                    "explanation": "Vessel detected in spill corridor",
+                    "cpa_distance_km": 1.5,
+                    "cpa_time": "2024-04-10T14:35:00+00:00",
+                    "track": [{"lon": -90.0, "lat": 24.0}, {"lon": -89.9, "lat": 24.1}],
+                }
+            ],
+            "drift_forecast": [
+                {"hours_elapsed": 6.0, "time": "2024-04-10T20:20:00+00:00", "polygon": {"type": "Polygon", "coordinates": []}},
+                {"hours_elapsed": 24.0, "time": "2024-04-11T14:20:00+00:00", "polygon": {"type": "Polygon", "coordinates": []}},
+            ],
+        }
+    ],
+}
+
+
+class TestPipelineResultTranslation:
+    def test_drift_forecast_mapped(self) -> None:
+        run = _pipeline_to_contract(SAMPLE_PIPELINE_RESULT, SCENE_ID)
+        forecast = run["drift"]["forecast"]
+        assert [f["hours"] for f in forecast] == [6, 24]
+        assert forecast[0]["time"] == "2024-04-10T20:20:00+00:00"
+        assert run["drift"]["hindcast"] == []
+
+    def test_vessels_mapped(self) -> None:
+        run = _pipeline_to_contract(SAMPLE_PIPELINE_RESULT, SCENE_ID)
+        vessel = run["vessels"][0]
+        assert vessel["mmsi"] == "367123452"
+        assert vessel["name"] == "TANKER Gamma"
+        assert vessel["track"]["coordinates"] == [[-90.0, 24.0], [-89.9, 24.1]]
+
+    def test_alert_status_mapped(self) -> None:
+        run = _pipeline_to_contract(SAMPLE_PIPELINE_RESULT, SCENE_ID)
+        assert run["alert"]["status"] == "new"
+
+
+# --------------------------------------------------------------------------- #
+# Regression: list endpoint and detail endpoint must agree on a run's status
+# --------------------------------------------------------------------------- #
+MULTI_SPILL_SCENE_ID = "multi_spill_scene"
+
+
+def _spill_entry(spill_id: str, alerted: bool, status: str) -> Dict[str, Any]:
+    feature = json.loads(json.dumps(SAMPLE_FEATURE))
+    feature["properties"]["spill_id"] = spill_id
+    return {
+        "spill": feature,
+        "alert": {
+            "spill_id": spill_id if alerted else None,
+            "alert": alerted,
+            "status": status,
+            "rules": [],
+            "last_updated": "2024-04-10T14:40:00+00:00",
+        },
+        "vessels": [],
+        "drift_forecast": [],
+    }
+
+
+# spills[0] is NOT alerted; spills[1] is — the exact shape that let the list
+# endpoint (spills[0]-only) and detail endpoint (first-alerted) disagree.
+SAMPLE_MULTI_SPILL_RESULT: Dict[str, Any] = {
+    "generated_at": "2024-04-10T14:30:00+00:00",
+    "scene_id": MULTI_SPILL_SCENE_ID,
+    "spills": [
+        _spill_entry(f"{MULTI_SPILL_SCENE_ID}_spill_001", alerted=False, status="rejected"),
+        _spill_entry(f"{MULTI_SPILL_SCENE_ID}_spill_002", alerted=True, status="possible"),
+    ],
+}
+
+
+@pytest.fixture()
+def populated_multi_spill_pipeline(spills_dir: Path, tmp_path: Path) -> Path:
+    """Write a pipeline_result.json for MULTI_SPILL_SCENE_ID under the same
+    tmp_path the ``spills_dir`` fixture already pointed settings at."""
+    run_dir = tmp_path / "data" / "processed" / MULTI_SPILL_SCENE_ID
+    run_dir.mkdir(parents=True)
+    result_path = run_dir / "pipeline_result.json"
+    result_path.write_text(json.dumps(SAMPLE_MULTI_SPILL_RESULT), encoding="utf-8")
+    return result_path
+
+
+class TestStatusSelectionConsistency:
+    def test_select_target_spill_prefers_alerted(self) -> None:
+        target = _select_target_spill(SAMPLE_MULTI_SPILL_RESULT["spills"])
+        assert target["alert"]["status"] == "possible"
+
+    def test_list_and_detail_agree_on_status(
+        self, populated_multi_spill_pipeline: Path
+    ) -> None:
+        list_resp = client.get("/api/runs")
+        assert list_resp.status_code == 200
+        runs = {r["scene_id"]: r for r in list_resp.json()}
+        assert MULTI_SPILL_SCENE_ID in runs
+        list_status = runs[MULTI_SPILL_SCENE_ID]["alert_status"]
+
+        detail_resp = client.get(f"/api/runs/{MULTI_SPILL_SCENE_ID}")
+        assert detail_resp.status_code == 200
+        detail_status = detail_resp.json()["alert"]["status"]
+
+        assert list_status == detail_status == "possible"
+
+
+# --------------------------------------------------------------------------- #
+# Regression: list and detail must agree for every raw status word, not just
+# "possible" (which happened to match by coincidence — "possible" maps to
+# itself). Mirrors src/alerts/manager.py's real (alert, status) pairings:
+# "rejected" only ever pairs with alert=False, "active"/"possible" with True.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "scene_id, alerted, raw_status, expected_mapped",
+    [
+        ("status_scene_active", True, "active", "new"),
+        ("status_scene_possible", True, "possible", "possible"),
+        ("status_scene_rejected", False, "rejected", "none"),
+    ],
+)
+class TestStatusWordConsistency:
+    def test_list_and_detail_agree(
+        self,
+        spills_dir: Path,
+        tmp_path: Path,
+        scene_id: str,
+        alerted: bool,
+        raw_status: str,
+        expected_mapped: str,
+    ) -> None:
+        result = {
+            "generated_at": "2024-04-10T14:30:00+00:00",
+            "scene_id": scene_id,
+            "spills": [_spill_entry(f"{scene_id}_spill_001", alerted=alerted, status=raw_status)],
+        }
+        run_dir = tmp_path / "data" / "processed" / scene_id
+        run_dir.mkdir(parents=True)
+        (run_dir / "pipeline_result.json").write_text(json.dumps(result), encoding="utf-8")
+
+        list_resp = client.get("/api/runs")
+        assert list_resp.status_code == 200
+        runs = {r["scene_id"]: r for r in list_resp.json()}
+        assert scene_id in runs
+        list_status = runs[scene_id]["alert_status"]
+
+        detail_resp = client.get(f"/api/runs/{scene_id}")
+        assert detail_resp.status_code == 200
+        detail_status = detail_resp.json()["alert"]["status"]
+
+        assert list_status == detail_status == expected_mapped
 
 
 # --------------------------------------------------------------------------- #
