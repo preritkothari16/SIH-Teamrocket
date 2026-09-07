@@ -16,6 +16,7 @@ just embed this map as-is.
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
@@ -56,31 +57,37 @@ def _centroid(geometry: Dict[str, Any]) -> List[float]:
 
 def _spill_popup(spill: Dict[str, Any], alert: Dict[str, Any]) -> str:
     properties = spill.get("properties") or {}
-    spill_id = alert.get("spill_id") or properties.get("spill_id") or "unknown"
+    spill_id = html.escape(str(alert.get("spill_id") or properties.get("spill_id") or "unknown"))
     area_km2 = properties.get("area_km2")
     area_text = f"{area_km2:.3f} km²" if area_km2 is not None else "unknown area"
+    status = html.escape(str(alert.get('status', 'unknown')))
     return (
         f"<b>{spill_id}</b><br>"
-        f"status: {alert.get('status', 'unknown')}<br>"
+        f"status: {status}<br>"
         f"area: {area_text}<br>"
         f"candidates: {len(alert.get('rules') or [])} rule(s) evaluated"
     )
 
 
 def _forecast_popup(forecast: Dict[str, Any]) -> str:
-    return f"+{forecast['hours_elapsed']:.0f}h forecast<br>{forecast.get('time', 'unknown time')}"
+    time = html.escape(str(forecast.get('time', 'unknown time')))
+    return f"+{forecast['hours_elapsed']:.0f}h forecast<br>{time}"
 
 
 def _hindcast_popup(snapshot: "OriginSnapshot") -> str:
-    return f"-{snapshot.hours_before_acquisition:.0f}h hindcast<br>{snapshot.time.isoformat()}"
+    time = html.escape(snapshot.time.isoformat())
+    return f"-{snapshot.hours_before_acquisition:.0f}h hindcast<br>{time}"
 
 
 def _vessel_popup(vessel: Dict[str, Any], rank: int) -> str:
-    name = vessel.get("vessel_name") or "unknown name"
+    name = html.escape(str(vessel.get("vessel_name") or "unknown name"))
+    mmsi = html.escape(str(vessel.get('mmsi', 'unknown')))
+    score = vessel.get('score', 'n/a')
+    explanation = html.escape(str(vessel.get('explanation', 'no explanation recorded')))
     return (
-        f"<b>#{rank + 1} - MMSI {vessel.get('mmsi', 'unknown')}</b> ({name})<br>"
-        f"score: {vessel.get('score', 'n/a')}<br>"
-        f"{vessel.get('explanation', 'no explanation recorded')}"
+        f"<b>#{rank + 1} - MMSI {mmsi}</b> ({name})<br>"
+        f"score: {score}<br>"
+        f"{explanation}"
     )
 
 

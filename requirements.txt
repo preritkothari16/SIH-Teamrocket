@@ -1,45 +1,46 @@
 # --- geospatial / raster ---
-rasterio
-numpy
-scipy
-shapely
-geopandas
-pyproj
+rasterio==1.4.4
+numpy==2.4.6
+scipy==1.17.1
+shapely==2.1.2
+geopandas==1.1.4
+pyproj==3.7.2
 
 # --- deep learning / segmentation ---
-torch
-segmentation-models-pytorch
-albumentations
+torch==2.14.0+cpu
+segmentation-models-pytorch==0.5.0
+albumentations==2.0.8
 
 # --- tabular / trajectory / gridded data ---
-pandas
-movingpandas
-xarray
-netCDF4
+pandas==3.0.5
+movingpandas==0.23.0
+xarray==2026.7.0
+netCDF4==1.7.4
 
 # --- api ---
-fastapi
-uvicorn
-pydantic
-pydantic-settings
+fastapi==0.141.1
+uvicorn==0.52.4
+pydantic==2.13.5
+pydantic-settings==2.15.0
 
 # --- parquet (tile index) ---
-pyarrow
+pyarrow==25.0.1
 
 # --- config / testing ---
-PyYAML
-pytest
+PyYAML==6.0.3
+pytest==9.1.1
 
 # --- visualization ---
-matplotlib
-folium
+matplotlib==3.11.1
+folium==0.20.0
 
 # transitive pin: albucore pulls stringzilla, and 4.x/5.x ship no Windows
 # cp311 wheel (would need MSVC build tools). 3.x has one.
 stringzilla<4
 
 # --- http (catalogue client) ---
-requests
+requests==2.34.2
+httpx>=0.23.0
 
 # --- image io (detection dataset) ---
-Pillow
+Pillow==12.3.0
