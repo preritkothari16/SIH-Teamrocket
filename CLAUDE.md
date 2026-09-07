@@ -269,6 +269,68 @@ scene = LocalSceneSource(root="D:/SIH/01_Train_Val_Oil_Spill_images").scenes()[0
 run_pipeline(scene)          # -> data/processed/<scene_id>/ + tile_index.parquet
 ```
 
+## Engineering review (2026-09-07)
+
+A full backend review (all phases, no code changes) rated the backend **7/10
+— functionally complete, not yet demo/production-hardened**. Architecture and
+phase boundaries were confirmed clean; a frontend can be built against the
+combined-JSON contract (`spill`/`alert`/`vessels`/`drift_forecast`) as-is.
+Findings not yet fixed, in priority order:
+
+**Must fix**
+- `requirements.txt` is missing `httpx` — `tests/test_dashboard.py` only
+  collects today because `huggingface_hub` happens to pull it in transitively;
+  a clean install breaks the test suite.
+- No dependency version pins — a live `numpy`/C-extension ABI warning already
+  appears in `test_env_currents.py`; pin at least `numpy`, `netCDF4`,
+  `rasterio`, `shapely`, `pandas`, `torch`.
+- `src/output/map.py`'s popups/tooltips (`_spill_popup`, `_vessel_popup`,
+  `_forecast_popup`) don't `html.escape()` their values, unlike
+  `report.py`/`dashboard.py` which do — a vessel_name from an AIS export
+  renders raw HTML in the map.
+
+**Should fix**
+- `src/drift/particle_model.py::scatter_particles()`'s rejection-sampling
+  loop hangs forever on a degenerate/zero-area geometry (verified: a
+  `LineString` input never returns). Unreachable from the real pipeline today
+  (`mask_to_polygon()` never produces one), but a real risk the moment a
+  frontend lets a caller supply a hand-edited polygon.
+- `scripts/run_live.py`: `poll_once()`/`CDSECatalogue.search()` isn't inside
+  the per-scene try/except (only `run_pipeline.run()` is) — one network
+  failure permanently kills the "continuous" poller. Also `since` advances
+  even when a scene's pipeline run failed, so that scene is never retried.
+- `src/output/dashboard.py`'s `GET /` rebuilds the whole map and recomputes
+  every alerted spill's hindcast corridor on every request, not once at
+  startup; one malformed spill's `hindcast_origin()` call (uncaught) would
+  500 the entire page on every reload.
+- `src/detection/infer.py::db_to_model_input()` collapses a real 2-band
+  VH/VV tile to band-0-repeated-3x instead of using both bands — fix before
+  any real training run (currently invisible, no checkpoint exists yet).
+- Wind-gated look-alike rejection (`lookalike_filter.py::classify_blob()`)
+  is fully built and tested but `scripts/run_detection.py` never passes
+  `wind_speed=` — dead in the real run path. Wire it or note it here as
+  intentionally unwired.
+- `scripts/run_pipeline.py`'s `with SpillRegistry(...) as registry:` block
+  (around line 125) holds the sqlite connection open across per-spill drift
+  forecasting and AIS attribution, not just registry reads/writes — risks a
+  lock timeout if two processes (e.g. the live poller + a manual run) hit the
+  same registry file concurrently. `evaluate_alert()`'s dedup check-then-act
+  is also a non-atomic read+write race under concurrent writers.
+- `SpillRegistry` (`src/alerts/registry.py`) has no direct unit tests — only
+  exercised indirectly via `evaluate_alert`/`process_spill`.
+- `src/attribution/anomaly_features.py::speed_change_score()` divides by
+  `baseline` after only checking `baseline < min_baseline_speed_knots` — if
+  that config field is ever set to `0.0` and baseline is exactly `0.0`,
+  `ZeroDivisionError`.
+- `src/ais/query.py` and `src/ais/filter.py` use unvectorized per-row Python
+  loops (`.apply(axis=1)`, a list comprehension over `.distance()`) for
+  AIS-point-in-area and CPA-distance — fine at every AIS export size used so
+  far, will be the first thing to slow down on a real, busy-shipping-lane
+  export.
+
+Full findings (including Optional/Note-only items, and everything confirmed
+*not* a problem) are in that review's own report, not duplicated here.
+
 ## Working agreement
 
 The user drives this step by step and says **"stop here"** at the end of each
