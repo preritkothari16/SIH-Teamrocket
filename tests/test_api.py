@@ -413,16 +413,28 @@ class TestGetReportEndpoint:
         assert resp.status_code == 404
 
     def test_returns_report_when_exists(self, populated_spills: Path) -> None:
-        report = {"scene_id": SCENE_ID, "summary": "test report"}
-        # Write to the scene's own directory (pipeline_result.json convention)
+        # run_pipeline.py --report's default output: report.html next to
+        # pipeline_result.json — NOT pipeline_result.json itself (that's the
+        # raw combined JSON, already served by GET /api/runs/:id).
         scene_dir = populated_spills.parent / SCENE_ID
         scene_dir.mkdir(parents=True, exist_ok=True)
-        report_path = scene_dir / "pipeline_result.json"
-        report_path.write_text(json.dumps(report), encoding="utf-8")
+        report_path = scene_dir / "report.html"
+        report_path.write_text("<html><body>test report</body></html>", encoding="utf-8")
 
         resp = client.get(f"/api/runs/{SCENE_ID}/report")
         assert resp.status_code == 200
-        assert resp.json()["scene_id"] == SCENE_ID
+        assert resp.headers["content-type"].startswith("text/html")
+        assert b"test report" in resp.content
+
+    def test_does_not_serve_pipeline_result_as_report(self, populated_spills: Path) -> None:
+        scene_dir = populated_spills.parent / SCENE_ID
+        scene_dir.mkdir(parents=True, exist_ok=True)
+        (scene_dir / "pipeline_result.json").write_text(
+            json.dumps({"scene_id": SCENE_ID}), encoding="utf-8"
+        )
+
+        resp = client.get(f"/api/runs/{SCENE_ID}/report")
+        assert resp.status_code == 404
 
 
 class TestTriggerRunEndpoint:

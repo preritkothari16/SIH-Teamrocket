@@ -3,7 +3,7 @@ import { SpillPanel } from './components/SpillPanel';
 import { VesselList } from './components/VesselList';
 import { DriftTimeline } from './components/DriftTimeline';
 import { AlertBadge } from './components/AlertBadge';
-import { listRuns, getRun, checkHealth } from './api/client';
+import { listRuns, getRun, getReport, checkHealth } from './api/client';
 import type { PipelineRun } from './types/schema';
 
 export class App {
@@ -13,6 +13,7 @@ export class App {
   private driftTimeline: DriftTimeline;
   private alertBadge: AlertBadge;
   private apiAvailable = false;
+  private currentSceneId: string | null = null;
 
   constructor() {
     const mapEl = document.getElementById('map')!;
@@ -36,6 +37,7 @@ export class App {
     this.setupSelector();
     this.setupLegendToggle();
     this.setupClearButton();
+    this.setupReportButton();
   }
 
   private async checkApi(): Promise<void> {
@@ -83,12 +85,16 @@ export class App {
         const sceneId = value.slice(4);
         try {
           const data = await getRun(sceneId);
+          this.currentSceneId = sceneId;
+          this.updateReportButton();
           this.loadRun(data);
         } catch (err) {
           console.error('Failed to load run from API:', err);
         }
       } else {
-        // Mock fixture
+        // Mock fixture — no backend-generated report to export
+        this.currentSceneId = null;
+        this.updateReportButton();
         try {
           const response = await fetch(`/src/mocks/fixtures/${value}.json`);
           const data: PipelineRun = await response.json();
@@ -98,6 +104,29 @@ export class App {
         }
       }
     });
+  }
+
+  private setupReportButton(): void {
+    const btn = document.getElementById('report-btn');
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+      if (!this.currentSceneId) return;
+      try {
+        const blob = await getReport(this.currentSceneId);
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } catch (err) {
+        console.error('Failed to fetch report:', err);
+      }
+    });
+  }
+
+  private updateReportButton(): void {
+    const btn = document.getElementById('report-btn') as HTMLButtonElement | null;
+    if (!btn) return;
+    btn.hidden = !this.currentSceneId;
   }
 
   private setupLegendToggle(): void {
@@ -116,6 +145,8 @@ export class App {
 
     btn.addEventListener('click', () => {
       this.clear();
+      this.currentSceneId = null;
+      this.updateReportButton();
       const select = document.getElementById('mock-select') as HTMLSelectElement;
       if (select) select.value = '';
     });

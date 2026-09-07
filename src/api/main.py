@@ -76,17 +76,17 @@ def api_get_run(scene_id: str) -> PipelineRun:
 
 @app.get("/api/runs/{scene_id}/report")
 def api_get_report(scene_id: str):
-    """Return the Step 5.3 report file if it exists, 404 otherwise."""
+    """Return the Step 5.3 standalone HTML incident report, 404 otherwise."""
     report = get_report_path(scene_id)
     if report is None:
         raise HTTPException(
             status_code=404,
-            detail=f"No report for '{scene_id}' — run the pipeline first",
+            detail=f"No report for '{scene_id}' — run the pipeline with --report first",
         )
     return FileResponse(
         report,
-        media_type="application/json",
-        filename=f"{scene_id}_report.json",
+        media_type="text/html",
+        filename=f"{scene_id}_report.html",
     )
 
 

@@ -114,7 +114,65 @@ the ranked vessel list (empty if not alerted or no `--ais` given).
 Add `--map` to also save a basic Folium map next to it (`map.html` by
 default, or `--map-output <path>`), showing every spill's polygon and any
 candidate vessel tracks, colour-coded by rank, with a popup per vessel naming
-its score and explanation string.
+its score and explanation string. Add `--report` to also save a standalone
+HTML incident report (`report.html` by default, or `--report-output <path>`)
+— the same map embedded, plus the ranked vessel table and drift forecast.
+
+## Running the demo (web API + frontend)
+
+Two processes, no credentials needed for the local demo path — the demo
+scene is pre-downloaded and already processed with `--stub-model`, so
+none of the CDSE/CDS/CMEMS variables above are required.
+
+**1. Backend** (from the repo root, with `.venv` active):
+
+```bash
+.venv/Scripts/python.exe -m uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Serves the JSON API the frontend consumes: `GET /api/runs` (every processed
+scene under `data/processed/`), `GET /api/runs/{scene_id}` (full detection +
+alert + vessels + drift for one scene), `GET /api/runs/{scene_id}/report`
+(the standalone HTML incident report, if `--report` was run for that scene),
+and `POST /api/runs` (trigger `run_pipeline.py` synchronously on a scene —
+fine for a demo, not for concurrent use). At least one scene needs a
+`pipeline_result.json` under `data/processed/<scene_id>/` for `/api/runs` to
+return anything — run the pipeline command above first if `data/processed/`
+is empty.
+
+**2. Frontend** (separate terminal, from `frontend/`):
+
+```bash
+npm install
+cp .env.example .env   # VITE_API_BASE_URL, defaults to http://localhost:8000
+npm run dev
+```
+
+Open the printed local URL (Vite's default is `http://localhost:5173`). The
+scene dropdown's "Backend runs" group lists every scene the API found; mock
+fixture scenarios stay available below it as an offline fallback if the
+backend isn't running.
+
+**What a judge sees, running the included demo case (scene `00000`, a real
+2048² Sentinel-1-shaped scene, 304 detected candidate blobs):** selecting it
+populates the map with the one alerted slick's polygon and its 6/12/24/48h
+drift forecast, the spill panel with its confidence/area/bearing/centroid,
+the alert badge reading "Possible" (this scene's wind check didn't clear the
+bar for "active" — see the note below), and the vessel list explicitly
+reading "No vessel attribution data" (no AIS export was supplied for this
+run — attribution isn't skipped, there's just nothing to attribute against).
+A "Report" button appears for any real backend run and opens the same
+scene's full HTML incident report in a new tab.
+
+A few things worth saying out loud rather than letting a judge ask: every
+other one of the 304 candidate blobs in this scene shows "rejected" (mostly
+on minimum-area), which is normal — one alert per scene is realistic, not a
+sign the detector under-fired; the "active" alert status never appears in
+this environment because it requires a real wind-speed reading and this
+demo runs on a local wind fixture, not live ERA5; and the vessel list being
+empty here is a supply gap (no AIS export shipped with the repo), not a
+broken attribution path — `scripts/run_attribution.py`'s own tests exercise
+that path against synthetic AIS.
 
 ## Roadmap
 

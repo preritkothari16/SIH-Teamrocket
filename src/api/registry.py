@@ -204,13 +204,23 @@ def get_run(
 def get_report_path(
     scene_id: str, settings: Optional[Settings] = None
 ) -> Optional[Path]:
-    """Return path to the report file if it exists, else None."""
+    """Return path to the Step 5.3 standalone HTML incident report
+    (:mod:`src.output.report`), if ``run_pipeline.py --report`` has been run
+    for this scene, else None.
+
+    ``run_pipeline.py``'s default output name is ``report.html`` next to
+    ``pipeline_result.json`` (``target.with_name("report.html")``); a custom
+    ``--report-output`` can name it anything, so ``{scene_id}_report.html``
+    and a shared ``reports/`` directory are also checked. This is never
+    ``pipeline_result.json`` itself — that's the raw combined JSON, not a
+    report, and is served by ``get_run()`` instead.
+    """
     settings = settings or get_settings()
     processed = _processed_dir(settings)
     candidates = [
-        processed / scene_id / "pipeline_result.json",
-        processed / scene_id / f"{scene_id}_report.json",
-        processed / "reports" / f"{scene_id}_report.json",
+        processed / scene_id / "report.html",
+        processed / scene_id / f"{scene_id}_report.html",
+        processed / "reports" / f"{scene_id}_report.html",
     ]
     for p in candidates:
         if p.is_file():
