@@ -1,0 +1,183 @@
+{
+  "generated_at": "2024-04-10T14:30:00+00:00",
+  "scene_id": "demo_pipeline",
+  "stub_model": true,
+  "ais_source": null,
+  "spills": [
+    {
+      "spill": {
+        "type": "Feature",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -90.2,
+                23.8
+              ],
+              [
+                -89.7,
+                24.2
+              ],
+              [
+                -89.3,
+                24.0
+              ],
+              [
+                -89.8,
+                23.5
+              ],
+              [
+                -90.2,
+                23.8
+              ]
+            ]
+          ]
+        },
+        "properties": {
+          "spill_id": "demo_pipeline_spill_001",
+          "scene_id": "demo_pipeline",
+          "acquisition_timestamp": "2024-04-10T14:20:00+00:00",
+          "detected_at": "2024-04-10T14:25:00+00:00",
+          "area_km2": 8.3,
+          "perimeter_km": 15.2,
+          "centroid_lon": -89.9999,
+          "centroid_lat": 24.1111,
+          "bbox": [
+            -90.5,
+            23.5,
+            -89.5,
+            24.5
+          ],
+          "orientation_deg": 90.0,
+          "elongation": 2.1,
+          "major_axis_km": 12.5,
+          "minor_axis_km": 5.95,
+          "mean_confidence": 0.85,
+          "estimated_volume_m3": 8300.0,
+          "crs": "EPSG:4326"
+        }
+      },
+      "alert": {
+        "alert": true,
+        "status": "active",
+        "spill_id": "evt_a1b2c3d4",
+        "is_new": true,
+        "rules": [
+          {
+            "name": "confidence",
+            "passed": true,
+            "reason": "confidence 0.85 >= 0.70"
+          },
+          {
+            "name": "area",
+            "passed": true,
+            "reason": "area 8.300 km2 >= 0.100 km2"
+          },
+          {
+            "name": "wind",
+            "passed": true,
+            "reason": "wind 7.2 m/s within [2.0, 12.0] m/s"
+          },
+          {
+            "name": "exclusion_zone",
+            "passed": true,
+            "reason": "outside all exclusion zones"
+          },
+          {
+            "name": "dedup",
+            "passed": true,
+            "reason": "no matching recent event"
+          }
+        ]
+      },
+      "vessels": [
+        {
+          "mmsi": 367123450,
+          "vessel_name": "TANKER Alpha",
+          "vessel_type": "tanker",
+          "cpa_distance_km": 3.2,
+          "cpa_time": "2024-04-10T14:45:00+00:00",
+          "score": 0.92,
+          "spatial_score": 0.88,
+          "temporal_score": 0.95,
+          "alignment_score": 0.91,
+          "type_prior": 1.0,
+          "explanation": "3.2 km CPA, 0.4h before image, track within 8 deg of slick axis, tanker",
+          "track": [
+            {
+              "timestamp": "2024-04-10T12:00:00+00:00",
+              "lat": 24.0,
+              "lon": -89.9
+            },
+            {
+              "timestamp": "2024-04-10T12:30:00+00:00",
+              "lat": 24.3,
+              "lon": -89.7
+            },
+            {
+              "timestamp": "2024-04-10T13:00:00+00:00",
+              "lat": 24.6,
+              "lon": -89.5
+            },
+            {
+              "timestamp": "2024-04-10T13:30:00+00:00",
+              "lat": 24.9,
+              "lon": -89.3
+            },
+            {
+              "timestamp": "2024-04-10T14:00:00+00:00",
+              "lat": 25.2,
+              "lon": -89.1
+            },
+            {
+              "timestamp": "2024-04-10T14:30:00+00:00",
+              "lat": 25.5,
+              "lon": -88.9
+            }
+          ]
+        },
+        {
+          "mmsi": 367123451,
+          "vessel_name": "TANKER Beta",
+          "vessel_type": "tanker",
+          "cpa_distance_km": 8.7,
+          "cpa_time": "2024-04-10T15:10:00+00:00",
+          "score": 0.67,
+          "spatial_score": 0.55,
+          "temporal_score": 0.72,
+          "alignment_score": 0.68,
+          "type_prior": 1.0,
+          "explanation": "8.7 km CPA, 0.8h before image, parallel trajectory, tanker",
+          "track": [
+            {
+              "timestamp": "2024-04-10T12:00:00+00:00",
+              "lat": 23.9,
+              "lon": -89.8
+            },
+            {
+              "timestamp": "2024-04-10T12:30:00+00:00",
+              "lat": 24.2,
+              "lon": -89.6
+            },
+            {
+              "timestamp": "2024-04-10T13:00:00+00:00",
+              "lat": 24.5,
+              "lon": -89.4
+            },
+            {
+              "timestamp": "2024-04-10T13:30:00+00:00",
+              "lat": 24.8,
+              "lon": -89.2
+            },
+            {
+              "timestamp": "2024-04-10T14:00:00+00:00",
+              "lat": 25.1,
+              "lon": -89.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

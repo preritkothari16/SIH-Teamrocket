@@ -21,6 +21,10 @@ data/alerts/*
 !data/env/.gitkeep
 !data/alerts/.gitkeep
 
+# --- demo scene (fresh-clone out-of-the-box) ---
+!data/processed/demo_pipeline/
+!data/processed/demo_pipeline/**
+
 models/*
 !models/.gitkeep
 
