@@ -27,8 +27,7 @@ export class App {
     const runListEl = document.getElementById('run-list')!;
     const overlayEl = document.getElementById('spill-overlay')!;
     const drawerEl = document.getElementById('vessel-drawer')!;
-    const drawerContentEl = document.getElementById('vessel-drawer-content')!;
-    const drawerCloseBtn = document.getElementById('vessel-drawer-close')!;
+
     this.runListPanel = document.getElementById('run-list-panel')!;
     this.runListToggle = document.getElementById('run-list-toggle')!;
     this.globeHint = document.getElementById('globe-hint')!;
@@ -45,7 +44,7 @@ export class App {
     });
 
     this.spillOverlay = new SpillOverlay(overlayEl);
-    this.vesselDrawer = new VesselDrawer(drawerEl, drawerContentEl, drawerCloseBtn);
+    this.vesselDrawer = new VesselDrawer(drawerEl);
 
     this.init();
   }
@@ -117,7 +116,7 @@ export class App {
 
     if (runId === null) {
       this.spillOverlay.render(null);
-      this.vesselDrawer.close();
+      this.vesselDrawer.hide();
       this.globeHint.style.opacity = '1';
       this.selectedSceneId = null;
       this.reportBtn.hidden = true;

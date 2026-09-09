@@ -1,88 +1,96 @@
 import type { Vessel } from '../types/schema';
 
-const SCORE_COLORS: Record<string, string> = {
-  high: 'bg-emerald-500',
-  mid: 'bg-amber-500',
-  low: 'bg-zinc-500',
-};
-
-function scoreColor(score: number): string {
-  if (score >= 0.8) return SCORE_COLORS.high;
-  if (score >= 0.5) return SCORE_COLORS.mid;
-  return SCORE_COLORS.low;
-}
-
 export class VesselDrawer {
-  private drawerEl: HTMLElement;
-  private contentEl: HTMLElement;
+  private drawer: HTMLElement;
+  private content: HTMLElement;
   private closeBtn: HTMLElement;
-  constructor(drawerEl: HTMLElement, contentEl: HTMLElement, closeBtn: HTMLElement) {
-    this.drawerEl = drawerEl;
-    this.contentEl = contentEl;
-    this.closeBtn = closeBtn;
-    this.closeBtn.addEventListener('click', () => this.close());
+  constructor(drawer: HTMLElement) {
+    this.drawer = drawer;
+    this.content = drawer.querySelector('#vessel-drawer-content') as HTMLElement;
+    this.closeBtn = drawer.querySelector('#vessel-drawer-close') as HTMLElement;
+
+    this.closeBtn.addEventListener('click', () => this.hide());
   }
 
   render(vessels: Vessel[]): void {
     if (vessels.length === 0) {
-      this.contentEl.innerHTML = `
-        <div class="px-4 py-3 text-xs text-zinc-500 text-center">
-          No vessel attribution data
-        </div>
-      `;
-      this.open();
+      this.hide();
       return;
     }
 
-    const items = vessels
-      .sort((a, b) => b.score - a.score)
-      .map((v, i) => {
-        const scorePct = (v.score * 100).toFixed(0);
-        const color = scoreColor(v.score);
-        const time = new Date(v.cpa_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const items = vessels.map((vessel, i) => {
+      const rank = i + 1;
+      const rankClass = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-default';
+      const scorePct = (vessel.score * 100).toFixed(1);
+      const scoreBarColor = vessel.score >= 0.7 ? 'bg-emerald-500' : vessel.score >= 0.4 ? 'bg-amber-500' : 'bg-red-500';
+      const isTop = rank === 1;
+      const cpaDist = vessel.cpa_distance_km.toFixed(1);
+      const cpaTime = new Date(vessel.cpa_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return `
+        <div class="px-4 py-3 border-b border-zinc-800/20 hover:bg-zinc-800/30 transition-colors group ${isTop ? 'bg-zinc-800/20' : ''}">
+          <div class="flex items-start gap-3">
+            <!-- Rank Badge -->
+            <div class="rank-badge ${rankClass} shrink-0">${rank}</div>
 
-        return `
-          <div class="flex items-start gap-3 px-4 py-2.5 border-b border-zinc-800/50">
-            <div class="w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0 mt-0.5">
-              <span class="text-xs font-medium text-zinc-400">${i + 1}</span>
-            </div>
+            <!-- Vessel Info -->
             <div class="flex-1 min-w-0">
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-sm font-medium text-zinc-200 truncate">${v.name}</span>
-                <span class="text-xs text-zinc-500 font-mono shrink-0">${v.mmsi}</span>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-sm font-semibold text-zinc-100 truncate">${vessel.name || vessel.mmsi}</span>
+                ${isTop ? '<span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold uppercase">Top</span>' : ''}
               </div>
-              <div class="flex items-center gap-2 mt-1 text-xs text-zinc-500">
-                <span class="px-1 py-0.5 rounded bg-zinc-800 text-zinc-400">${v.vessel_type}</span>
-                <div class="flex items-center gap-1">
-                  <div class="w-8 h-1.5 rounded-full bg-zinc-700 overflow-hidden">
-                    <div class="h-full rounded-full ${color}" style="width:${scorePct}%"></div>
-                  </div>
-                  <span>${scorePct}%</span>
+
+              <!-- MMSI + Type -->
+              <div class="flex items-center gap-2 mb-2">
+                <span class="text-[10px] text-zinc-500 font-mono">${vessel.mmsi}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50 capitalize">${vessel.vessel_type}</span>
+              </div>
+
+              <!-- Score Bar -->
+              <div class="flex items-center gap-2 mb-2">
+                <div class="flex-1 h-2 rounded-full bg-zinc-800/60 overflow-hidden">
+                  <div class="h-full rounded-full ${scoreBarColor} score-bar-fill" style="--fill-width:${scorePct}%; width:${scorePct}%"></div>
                 </div>
-                <span>CPA ${v.cpa_distance_km.toFixed(1)} km</span>
-                <span>at ${time}</span>
+                <span class="text-xs font-mono font-semibold ${vessel.score >= 0.7 ? 'text-emerald-400' : vessel.score >= 0.4 ? 'text-amber-400' : 'text-red-400'}">${scorePct}%</span>
               </div>
-              <p class="text-xs text-zinc-500 mt-1 line-clamp-2">${v.explanation}</p>
+
+              <!-- CPA Info -->
+              <div class="grid grid-cols-2 gap-2 mb-2">
+                <div class="flex items-center gap-1.5 text-[11px]">
+                  <svg class="w-3 h-3 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                  <span class="text-zinc-500">CPA:</span>
+                  <span class="text-zinc-300 font-medium">${cpaDist} km</span>
+                </div>
+                <div class="flex items-center gap-1.5 text-[11px]">
+                  <svg class="w-3 h-3 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                  <span class="text-zinc-500">At:</span>
+                  <span class="text-zinc-300 font-medium">${cpaTime}</span>
+                </div>
+              </div>
+
+              <!-- Explanation -->
+              <div class="text-[11px] text-zinc-500 leading-relaxed">
+                ${vessel.explanation}
+              </div>
             </div>
           </div>
-        `;
-      })
-      .join('');
+        </div>
+      `;
+    }).join('');
 
-    this.contentEl.innerHTML = items;
-    this.open();
+    this.content.innerHTML = items;
+    this.show();
   }
 
-  private open(): void {
-    this.drawerEl.style.transform = 'translateY(0)';
+  show(): void {
+    this.drawer.style.transform = 'translateY(0)';
   }
 
-  close(): void {
-    this.drawerEl.style.transform = 'translateY(100%)';
+  hide(): void {
+    this.drawer.style.transform = 'translateY(100%)';
   }
 
   destroy(): void {
-    this.contentEl.innerHTML = '';
-    this.close();
+    this.content.innerHTML = '';
+    this.hide();
   }
 }
