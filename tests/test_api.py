@@ -84,6 +84,11 @@ def spills_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     spills = tmp_path / "data" / "processed" / "spills"
     spills.mkdir(parents=True)
     monkeypatch.setenv("SAROIL_PATHS__PROCESSED_DIR", str(tmp_path / "data" / "processed"))
+    # These tests exercise the local-file source; a real DATABASE_URL in the
+    # environment (a developer's own .env) would otherwise take priority —
+    # see src/api/registry.py's Postgres-first branch — and these fixtures
+    # would silently query an empty/unrelated real table instead.
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     # Settings caches — invalidate so the new path is picked up.
     from src.api import registry
     original = registry.get_settings

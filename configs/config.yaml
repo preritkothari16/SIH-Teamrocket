@@ -27,6 +27,7 @@ credentials:
   cds_api_key_env: CDS_API_KEY
   cmems_username_env: CMEMS_USERNAME
   cmems_password_env: CMEMS_PASSWORD
+  database_url_env: DATABASE_URL
 
 # --- satellite product search (step 1.x) ---
 ingestion:

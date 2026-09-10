@@ -40,7 +40,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS — allow the Vite dev server and any local origin for hackathon demos.
+# CORS — the local Vite dev server always, plus whatever the deployed
+# frontend's origin is (SAROIL_API__CORS_ORIGINS, e.g. a Vercel URL) — set
+# that as a Render env var, no code change/redeploy needed when it changes.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -48,6 +50,7 @@ app.add_middleware(
         "http://localhost:5174",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
+        *get_settings().api.extra_cors_origins,
     ],
     allow_credentials=True,
     allow_methods=["*"],
