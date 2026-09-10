@@ -1,21 +1,112 @@
-/* src/style.css - Tailwind directives */
+/* src/style.css - Tailwind directives + custom styles */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Globe container */
 #globe-container {
   transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: center center;
 }
 
-/* Scrollbar styling for dark panels */
+/* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 4px;
+  width: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgb(63, 63, 70);
-  border-radius: 2px;
+  background: rgba(113, 113, 122, 0.4);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.6);
+}
+
+/* Glow pulse for active alerts */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px 2px rgba(239, 68, 68, 0.3); }
+  50% { box-shadow: 0 0 16px 4px rgba(239, 68, 68, 0.5); }
+}
+.glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Score bar fill animation */
+@keyframes fill-bar {
+  from { width: 0%; }
+  to { width: var(--fill-width); }
+}
+.score-bar-fill {
+  animation: fill-bar 0.8s ease-out forwards;
+}
+
+/* Card hover lift effect */
+.card-hover {
+  transition: all 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* Status badge glow */
+.status-badge {
+  position: relative;
+}
+.status-badge::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  opacity: 0.3;
+  z-index: -1;
+}
+.status-badge-new::before { background: rgb(239, 68, 68); }
+.status-badge-possible::before { background: rgb(234, 179, 8); }
+
+/* Confidence ring */
+.confidence-ring {
+  background: conic-gradient(
+    var(--ring-color) var(--ring-pct),
+    rgb(39, 39, 42) var(--ring-pct)
+  );
+}
+
+/* Smooth fade in */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Rule tag colors */
+.rule-tag {
+  @apply text-[10px] px-2 py-0.5 rounded-md font-medium border transition-colors;
+}
+.rule-passed {
+  @apply bg-emerald-900/30 text-emerald-400 border-emerald-800/50;
+}
+.rule-failed {
+  @apply bg-red-900/30 text-red-400 border-red-800/50;
+}
+
+/* Vessel rank badge */
+.rank-badge {
+  @apply w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0;
+}
+.rank-1 {
+  @apply bg-amber-500/20 text-amber-400 border border-amber-500/30;
+}
+.rank-2 {
+  @apply bg-zinc-500/20 text-zinc-300 border border-zinc-600/30;
+}
+.rank-3 {
+  @apply bg-orange-900/30 text-orange-400 border border-orange-800/30;
+}
+.rank-default {
+  @apply bg-zinc-800 text-zinc-400 border border-zinc-700;
 }

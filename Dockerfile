@@ -27,9 +27,17 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-# torch==2.14.0+cpu (requirements.txt) is a PyTorch-CPU-index-only build —
-# it does not exist on plain PyPI. --extra-index-url adds that index
-# without replacing PyPI for everything else in the file.
+# requirements.txt pins a bare torch==2.14.0 (no +cpu) — correct for local
+# Windows dev, where PyPI's own wheel happens to be CPU-only, but on Linux
+# PyPI's torch wheel bundles full CUDA (~2GB extra, and a needless pull on
+# a CPU-only deploy target). Installing it explicitly from the CPU-only
+# index FIRST, pinned to the exact same version, satisfies the later plain
+# `torch==2.14.0` in requirements.txt (pip accepts an installed local
+# version like 2.14.0+cpu against a non-local `==2.14.0` constraint and
+# leaves it alone) without needing to touch that pin.
+RUN pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cpu \
+        torch==2.14.0
 RUN pip install --no-cache-dir \
         --extra-index-url https://download.pytorch.org/whl/cpu \
         -r requirements.txt
