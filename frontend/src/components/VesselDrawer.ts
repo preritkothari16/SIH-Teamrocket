@@ -22,7 +22,7 @@ export class VesselDrawer {
       const rank = i + 1;
       const rankClass = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-default';
       const scorePct = (vessel.score * 100).toFixed(1);
-      const scoreBarColor = vessel.score >= 0.7 ? 'bg-emerald-500' : vessel.score >= 0.4 ? 'bg-amber-500' : 'bg-red-500';
+      const scoreBarColor = vessel.score >= 0.7 ? 'bg-emerald-400' : vessel.score >= 0.4 ? 'bg-amber-400' : 'bg-red-400';
       const isTop = rank === 1;
       const cpaDist = vessel.cpa_distance_km.toFixed(1);
       const cpaTime = new Date(vessel.cpa_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -58,12 +58,12 @@ export class VesselDrawer {
                 <div class="flex items-center gap-1.5 text-[11px]">
                   <svg class="w-3 h-3 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
                   <span class="text-zinc-500">CPA:</span>
-                  <span class="text-zinc-300 font-medium">${cpaDist} km</span>
+                  <span class="text-zinc-300 font-medium font-mono">${cpaDist} km</span>
                 </div>
                 <div class="flex items-center gap-1.5 text-[11px]">
                   <svg class="w-3 h-3 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
                   <span class="text-zinc-500">At:</span>
-                  <span class="text-zinc-300 font-medium">${cpaTime}</span>
+                  <span class="text-zinc-300 font-medium font-mono">${cpaTime}</span>
                 </div>
               </div>
 

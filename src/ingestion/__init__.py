@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from src.ingestion.local_source import LocalSceneSource, LocalSourceError, load_local_scenes
+from src.ingestion.safe import SAFEError, is_safe_archive, read_safe_bands, safe_measurement_members
 from src.ingestion.types import (
     OrbitInfo,
     Scene,
@@ -57,6 +58,10 @@ __all__ = [
     "filter_scenes",
     "parse_sentinel1_name",
     "scenes_to_geojson",
+    "SAFEError",
+    "is_safe_archive",
+    "read_safe_bands",
+    "safe_measurement_members",
     "CDSECatalogue",
     "CatalogueError",
     "CatalogueAuthError",

@@ -3,20 +3,20 @@ import type { PipelineRun } from '../../types/schema';
 
 type RGB = [number, number, number];
 
-/** Vivid, high-contrast colors — brighter than before for dark globe. */
+/** Vivid, high-contrast colors — boosted saturation for dark globe. */
 const STATUS_COLORS: Record<string, RGB> = {
-  new:     [1.0, 0.2, 0.2],   // bright red
-  update:  [1.0, 0.6, 0.0],   // vivid orange
-  possible:[1.0, 0.9, 0.1],   // bright yellow
-  none:    [0.45, 0.45, 0.5], // muted grey
+  new:     [1.0, 0.15, 0.15],   // intense red
+  update:  [1.0, 0.55, 0.0],    // vivid orange
+  possible:[1.0, 0.85, 0.0],    // bright yellow
+  none:    [0.4, 0.42, 0.48],   // muted grey
 };
 
-/** Glow halos (slightly desaturated, drawn on overlay). */
+/** Glow halos — more saturated for bolder bloom. */
 const STATUS_GLOW: Record<string, string> = {
-  new:      'rgba(255,50,50,',
-  update:   'rgba(255,150,0,',
-  possible: 'rgba(255,230,30,',
-  none:     'rgba(120,120,130,',
+  new:      'rgba(255,30,30,',
+  update:   'rgba(255,130,0,',
+  possible: 'rgba(255,210,0,',
+  none:     'rgba(100,105,120,',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -56,7 +56,7 @@ function buildMarkers(runs: PipelineRun[]): ValidatedMarker[] {
       continue;
     }
     markers.push({
-      spillId: run.alert?.spill_id ?? run.spill.scene_id,
+      spillId: run.alert?.spill_id || run.spill.scene_id,
       runIndex: i,
       lat,
       lon,
@@ -71,17 +71,17 @@ function buildMarkers(runs: PipelineRun[]): ValidatedMarker[] {
 
 /**
  * Marker size = base(status) × confidence scale.
- * "new" markers are 2× the size of "none" markers.
+ * "new" markers are 1.8× the size of "none" markers.
  * Confidence scales between 0.7× and 1.3×.
  */
 function markerSize(m: ValidatedMarker): number {
   const base: Record<string, number> = {
-    new: 0.08,
-    update: 0.065,
-    possible: 0.05,
-    none: 0.035,
+    new: 0.12,
+    update: 0.11,
+    possible: 0.09,
+    none: 0.07,
   };
-  const b = base[m.status] ?? 0.035;
+  const b = base[m.status] ?? 0.05;
   const confScale = 0.7 + m.confidence * 0.6;
   return b * confScale;
 }
@@ -169,53 +169,60 @@ function drawOverlay(
     const alpha = 0.35 + z * 0.65;
 
     const glowBase = STATUS_GLOW[m.status] ?? STATUS_GLOW.none;
+    const isNew = m.status === 'new';
 
-    // ── Subtle glow halo (contained, not bleeding) ──
-    const glowR = baseR * (isSelected ? 3 : 2.2);
-    const grad = ctx.createRadialGradient(x, y, baseR * 0.3, x, y, glowR);
-    grad.addColorStop(0, glowBase + (0.5 * alpha).toFixed(3) + ')');
-    grad.addColorStop(0.6, glowBase + (0.15 * alpha).toFixed(3) + ')');
+    // ── Glow halo — tighter, less aggressive ──
+    const glowR = baseR * (isNew ? 2 : isSelected ? 3 : 2.2);
+    const glowIntensity = isNew ? 0.5 : 0.4;
+    const grad = ctx.createRadialGradient(x, y, baseR * 0.2, x, y, glowR);
+    grad.addColorStop(0, glowBase + (glowIntensity * alpha).toFixed(3) + ')');
+    grad.addColorStop(0.4, glowBase + ((glowIntensity * 0.4) * alpha).toFixed(3) + ')');
     grad.addColorStop(1, glowBase + '0)');
     ctx.beginPath();
     ctx.arc(x, y, glowR, 0, Math.PI * 2);
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // ── Center dot (always visible, anchors the marker) ──
-    ctx.beginPath();
-    ctx.arc(x, y, Math.max(3, baseR * 0.35), 0, Math.PI * 2);
+    // ── Reticle ring (outer thin ring, targeting feel) ──
     const c = STATUS_COLORS[m.status] ?? STATUS_COLORS.none;
-    ctx.fillStyle = `rgba(${Math.round(c[0]*255)},${Math.round(c[1]*255)},${Math.round(c[2]*255)},${(0.95 * alpha).toFixed(3)})`;
-    ctx.fill();
-    // white outline for contrast
-    ctx.strokeStyle = `rgba(255,255,255,${(0.5 * alpha).toFixed(3)})`;
-    ctx.lineWidth = 1;
+    const ringR = Math.max(6, baseR * (isNew ? 1.1 : 0.9));
+    ctx.beginPath();
+    ctx.arc(x, y, ringR, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${Math.round(c[0]*255)},${Math.round(c[1]*255)},${Math.round(c[2]*255)},${(0.8 * alpha).toFixed(3)})`;
+    ctx.lineWidth = isNew ? 2 : 1.5;
     ctx.stroke();
 
-    // ── Pulse ring for "new" status ──
-    if (m.status === 'new') {
-      const pulseT = ((now / 1400) + m.runIndex * 0.3) % 1;
-      const pulseR = baseR * 1.5 + pulseT * baseR * 2.5;
+    // ── Inner dot (solid, anchors the marker) ──
+    const dotR = Math.max(2.5, baseR * (isNew ? 0.28 : 0.2));
+    ctx.beginPath();
+    ctx.arc(x, y, dotR, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${Math.round(c[0]*255)},${Math.round(c[1]*255)},${Math.round(c[2]*255)},${(0.95 * alpha).toFixed(3)})`;
+    ctx.fill();
+
+    // ── Pulse ring for "new" status — smaller, tighter, synced ──
+    if (isNew) {
+      const pulseT = ((now / 700) + m.runIndex * 0.3) % 1;
+      const pulseR = ringR * 1.1 + pulseT * ringR * 2;
       const pulseAlpha = (1 - pulseT) * 0.5 * alpha;
       ctx.beginPath();
       ctx.arc(x, y, pulseR, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,70,70,${pulseAlpha.toFixed(3)})`;
+      ctx.strokeStyle = `rgba(255,40,40,${pulseAlpha.toFixed(3)})`;
       ctx.lineWidth = 2;
       ctx.stroke();
     }
 
     // ── Selection ring ──
     if (isSelected) {
-      const ringR = baseR * 2;
+      const selRingR = baseR * 2;
       ctx.beginPath();
-      ctx.arc(x, y, ringR, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,255,255,${(0.8 * alpha).toFixed(3)})`;
+      ctx.arc(x, y, selRingR, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${(0.85 * alpha).toFixed(3)})`;
       ctx.lineWidth = 2.5;
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.arc(x, y, ringR + 4, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(255,255,255,${(0.2 * alpha).toFixed(3)})`;
+      ctx.arc(x, y, selRingR + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${(0.25 * alpha).toFixed(3)})`;
       ctx.lineWidth = 1;
       ctx.stroke();
     }
@@ -223,18 +230,44 @@ function drawOverlay(
     // ── Status label (directly above marker) ──
     const label = STATUS_LABELS[m.status];
     if (label) {
-      const fontSize = Math.max(9, Math.min(13, baseR * 0.9));
+      const fontSize = Math.max(10, Math.min(14, baseR * 0.85));
       ctx.font = `700 ${fontSize}px Inter, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      const labelY = y - baseR * 1.4 - 4;
+      const labelY = y - baseR * 1.4 - 6;
       // text shadow for contrast
-      ctx.fillStyle = `rgba(0,0,0,${(0.7 * alpha).toFixed(3)})`;
+      ctx.fillStyle = `rgba(0,0,0,${(0.8 * alpha).toFixed(3)})`;
       ctx.fillText(label, x + 1, labelY + 1);
-      const labelAlpha = isSelected ? 1 : 0.75;
+      const labelAlpha = isSelected ? 1 : 0.8;
       ctx.fillStyle = `rgba(255,255,255,${(labelAlpha * alpha).toFixed(3)})`;
       ctx.fillText(label, x, labelY);
     }
+  }
+
+  // ── Scan-line sweep (decorative rotating arc) ──
+  // Only draw when no spill is selected/focused, to avoid visual clutter.
+  // Also skip when reduced-motion is enabled.
+  const isSelecting = selectedId !== null;
+  const reducedMotion = document.body.dataset.reducedMotion === 'true';
+  if (!isSelecting && !reducedMotion) {
+    const scanAngle = (now / 6000) * Math.PI * 2; // 6s full rotation
+    const cx = w / 2;
+    const cy = h / 2;
+    const scanR = Math.min(w, h) / 2 * 0.85;
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = 'rgba(100,200,255,1)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, scanR, scanAngle, scanAngle + 0.6);
+    ctx.stroke();
+    // trailing fade
+    ctx.globalAlpha = 0.04;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(cx, cy, scanR, scanAngle - 0.3, scanAngle);
+    ctx.stroke();
+    ctx.restore();
   }
 }
 

@@ -8,9 +8,9 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const STATUS_GLOW: Record<string, string> = {
-  new: 'shadow-red-500/40',
-  update: 'shadow-orange-400/40',
-  possible: 'shadow-yellow-400/40',
+  new: 'shadow-red-500/50',
+  update: 'shadow-orange-400/50',
+  possible: 'shadow-yellow-400/50',
   none: '',
 };
 
@@ -29,9 +29,9 @@ const STATUS_TEXT: Record<string, string> = {
 };
 
 const STATUS_BG: Record<string, string> = {
-  new: 'bg-red-900/30 border-red-800/40',
-  update: 'bg-orange-900/30 border-orange-800/40',
-  possible: 'bg-yellow-900/30 border-yellow-800/40',
+  new: 'bg-red-900/40 border-red-700/50',
+  update: 'bg-orange-900/40 border-orange-700/50',
+  possible: 'bg-yellow-900/40 border-yellow-700/50',
   none: 'bg-zinc-800/50 border-zinc-700/40',
 };
 
@@ -71,7 +71,7 @@ export class RunList {
     }
 
     const items = runs.map((run, i) => {
-      const id = run.alert?.spill_id ?? run.spill.scene_id;
+      const id = run.alert?.spill_id || run.spill.scene_id;
       const status = run.alert?.status ?? 'none';
       const color = STATUS_COLORS[status] ?? STATUS_COLORS.none;
       const glow = STATUS_GLOW[status] ?? '';
@@ -83,13 +83,13 @@ export class RunList {
       const conf = run.spill.confidence;
       const confPct = (conf * 100).toFixed(0);
       const confColor = conf >= 0.8 ? 'text-emerald-400' : conf >= 0.5 ? 'text-amber-400' : 'text-red-400';
-      const confBarColor = conf >= 0.8 ? 'bg-emerald-500' : conf >= 0.5 ? 'bg-amber-500' : 'bg-red-500';
+      const confBarColor = conf >= 0.8 ? 'bg-emerald-400' : conf >= 0.5 ? 'bg-amber-400' : 'bg-red-400';
 
       return `
         <button class="run-item w-full text-left px-4 py-3.5 border-b border-zinc-800/30 hover:bg-zinc-800/40 transition-all duration-200 group card-hover ${isSelected ? 'bg-zinc-800/60 border-l-2 border-l-blue-500' : ''}" data-run-id="${id}" data-index="${i}">
           <div class="flex items-start gap-3">
             <div class="mt-1 relative">
-              <div class="w-3 h-3 rounded-full ${color} shadow-lg ${glow} shrink-0 ${status === 'new' ? 'glow-pulse' : ''}"></div>
+              <div class="w-3.5 h-3.5 rounded-full ${color} shadow-lg ${glow} shrink-0 ${status === 'new' ? 'glow-pulse' : ''}"></div>
             </div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between gap-2 mb-1.5">
@@ -103,7 +103,7 @@ export class RunList {
                   </div>
                   <span class="text-xs ${confColor} font-mono font-medium">${confPct}%</span>
                 </div>
-                <span class="text-xs text-zinc-500">${run.spill.area_km2.toFixed(1)} km&sup2;</span>
+                <span class="text-xs text-zinc-500 font-mono">${run.spill.area_km2.toFixed(1)} km&sup2;</span>
               </div>
               <div class="flex items-center gap-3 text-[10px] text-zinc-500">
                 <span class="flex items-center gap-1">

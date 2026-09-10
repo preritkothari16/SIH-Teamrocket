@@ -268,8 +268,24 @@ def classify_blob(
     cfg = settings.detection
     row_offset, col_offset = offset
 
+    pixels = int(np.count_nonzero(blob))
+
+    # Blobs covering a huge fraction of the scene are never real oil spills;
+    # skip the expensive argwhere/centroid/elongation measurements for them.
+    MAX_BLOB_PIXELS = 5_000_000
+    if pixels > MAX_BLOB_PIXELS:
+        return BlobVerdict(
+            blob_id=0,
+            pixels=pixels,
+            reasons=[f"blob too large ({pixels:,} px, max {MAX_BLOB_PIXELS:,})"],
+            centroid=(0.0, 0.0),
+            bbox=(0, 0, 0, 0),
+            mean_db=0.0, surround_db=0.0, contrast_db=0.0,
+            elongation=1.0, edge_gradient=0.0, orientation_deg=0.0,
+            mean_confidence=0.0, is_oil=False,
+        )
+
     coords = np.argwhere(blob)
-    pixels = int(coords.shape[0])
     centroid = (
         (float(coords[:, 0].mean()) + row_offset, float(coords[:, 1].mean()) + col_offset)
         if pixels

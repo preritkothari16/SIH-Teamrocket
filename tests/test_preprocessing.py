@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import math
+import zipfile
 from pathlib import Path
 from typing import Tuple
 
@@ -92,8 +93,15 @@ def write_scene_tif(
 
 
 def make_scene(path: Path, scene_id: str = "synthetic_scene") -> Scene:
-    with rasterio.open(path) as dataset:
-        bounds = dataset.bounds
+    if path.suffix.lower() == ".zip":
+        import zipfile
+        with zipfile.ZipFile(path) as archive:
+            members = [n for n in archive.namelist() if n.endswith((".tiff", ".tif"))]
+        with rasterio.open(f"/vsizip/{path.resolve().as_posix()}/{members[0]}") as dataset:
+            bounds = dataset.bounds
+    else:
+        with rasterio.open(path) as dataset:
+            bounds = dataset.bounds
     return Scene(
         scene_id=scene_id,
         source=SceneSourceKind.LOCAL,
@@ -192,6 +200,27 @@ def test_calibrate_honours_the_source_nodata(tmp_path: Path) -> None:
     image = calibrate(scene)
     assert math.isnan(float(image.data[0, 0, 0]))
     assert np.isfinite(image.data).sum() == 255
+
+
+def test_calibrate_reads_vv_and_vh_from_safe_zip(tmp_path: Path) -> None:
+    """SAFE archives keep each polarisation in its own measurement TIFF."""
+    safe_name = "S1A_IW_GRDH_1SDV_20230514T003332_20230514T003357_048456_05D45D_1A2B.SAFE"
+    vv = np.full((8, 8), 10.0, dtype=np.float32)
+    vh = np.full((8, 8), 20.0, dtype=np.float32)
+    vv_path = write_scene_tif(tmp_path / "vv.tiff", vv)
+    vh_path = write_scene_tif(tmp_path / "vh.tiff", vh)
+    archive_path = tmp_path / "scene.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.write(vv_path, f"{safe_name}/measurement/s1a-iw-grd-vv-test.tiff")
+        archive.write(vh_path, f"{safe_name}/measurement/s1a-iw-grd-vh-test.tiff")
+
+    scene = make_scene(archive_path, "safe_scene")
+    image = calibrate(scene)
+
+    assert image.band_names == ["VV", "VH"]
+    assert image.data.shape == (2, 8, 8)
+    assert image.data[0] == pytest.approx(np.full((8, 8), 20.0), abs=1e-4)
+    assert image.data[1] == pytest.approx(np.full((8, 8), 26.0206), abs=1e-4)
 
 
 def test_calibrate_rejects_a_scene_with_no_pixels(db_scene: Scene) -> None:

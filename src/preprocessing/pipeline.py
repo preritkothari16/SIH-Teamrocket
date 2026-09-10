@@ -50,6 +50,7 @@ from shapely.geometry import box, shape
 from shapely.geometry.base import BaseGeometry
 
 from src.config import Settings, get_settings
+from src.ingestion.safe import read_safe_bands, safe_measurement_members
 from src.ingestion.types import Scene
 
 logger = logging.getLogger(__name__)
@@ -196,13 +197,13 @@ def dn_to_sigma0(
     """
     amplitude = 10.0 ** (calibration_constant_db / 20.0)
     with np.errstate(invalid="ignore"):
-        return np.square(dn.astype(np.float64)) / (amplitude**2)
+        return np.square(dn.astype(np.float32)) / (amplitude**2)
 
 
 def to_db(linear: np.ndarray) -> np.ndarray:
     """Linear power to dB, with non-positive samples marked invalid."""
     with np.errstate(divide="ignore", invalid="ignore"):
-        db = 10.0 * np.log10(np.where(linear > 0, linear, np.nan))
+        db = 10.0 * np.log10(np.where(linear > 0, linear, np.nan).astype(np.float32))
     return db.astype(np.float32)
 
 
@@ -233,14 +234,7 @@ def calibrate(
     if not path.exists():
         raise PreprocessingError(f"scene {scene.scene_id} is missing from disk: {path}")
 
-    with rasterio.open(path) as dataset:
-        indexes = list(bands) if bands else list(dataset.indexes)
-        raw = dataset.read(indexes).astype(np.float32)
-        transform = dataset.transform
-        crs = dataset.crs
-        src_nodata = dataset.nodata
-        gcps, gcp_crs = dataset.get_gcps()
-        descriptions = [dataset.descriptions[i - 1] for i in indexes]
+    raw, transform, crs, src_nodata, gcps, gcp_crs, descriptions = _read_raster(path, bands)
 
     if src_nodata is not None:
         raw = np.where(raw == src_nodata, np.nan, raw)
@@ -254,7 +248,7 @@ def calibrate(
 
     band_names = [
         name or default
-        for name, default in zip(descriptions, _default_band_names(scene, len(indexes)))
+        for name, default in zip(descriptions, _default_band_names(scene, raw.shape[0]))
     ]
 
     return RasterImage(
@@ -267,6 +261,31 @@ def calibrate(
         gcps=gcps or None,
         gcp_crs=gcp_crs,
     )
+
+
+def _read_raster(
+    path: Path, bands: Optional[Sequence[int]],
+) -> Tuple[np.ndarray, Affine, Optional[CRS], Optional[float], Sequence[Any], Optional[CRS], List[Optional[str]]]:
+    """Read a regular raster or the VV/VH measurements from a SAFE ZIP."""
+    members = safe_measurement_members(path)
+    if members is None:
+        with rasterio.open(path) as dataset:
+            indexes = list(bands) if bands else list(dataset.indexes)
+            return (
+                dataset.read(indexes).astype(np.float32),
+                dataset.transform,
+                dataset.crs,
+                dataset.nodata,
+                dataset.get_gcps()[0],
+                dataset.get_gcps()[1],
+                [dataset.descriptions[i - 1] for i in indexes],
+            )
+
+    if bands is not None:
+        raise PreprocessingError("selecting band indexes is not supported for Sentinel-1 SAFE archives")
+
+    data, transform, crs, nodata, gcps, gcp_crs, band_names = read_safe_bands(path)
+    return data, transform, crs, nodata, gcps, gcp_crs, band_names
 
 
 def _default_band_names(scene: Scene, count: int) -> List[str]:
@@ -283,8 +302,8 @@ def _local_stats(
     data: np.ndarray, valid: np.ndarray, size: int
 ) -> Tuple[np.ndarray, np.ndarray]:
     """NaN-aware local mean and variance over a ``size`` square window."""
-    filled = np.where(valid, data, 0.0)
-    weight = uniform_filter(valid.astype(np.float64), size=size, mode="nearest")
+    filled = np.where(valid, data, 0.0).astype(np.float32)
+    weight = uniform_filter(valid.astype(np.float32), size=size, mode="nearest")
     mean = uniform_filter(filled, size=size, mode="nearest")
     mean_sq = uniform_filter(np.square(filled), size=size, mode="nearest")
 
