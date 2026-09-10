@@ -83,5 +83,12 @@
         }
       }
     ]
+  },
+  "provenance": {
+    "sar_source": "local",
+    "sar_scene_id": "scene-002",
+    "ais_source_label": "NOAA Office for Coastal Management historical AIS",
+    "wind_source": "era5_fixture",
+    "current_source": "cmems_fixture"
   }
 }

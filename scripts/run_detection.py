@@ -166,7 +166,7 @@ def run(
             centroid.y, centroid.x, scene.acquisition_time, settings=settings,
         )
         if wind_data is not None:
-            wind_speed = wind_data.speed_ms
+            wind_speed = wind_data.vector.speed_ms
     except (EnvDataError, Exception):
         pass  # unavailable wind is a fact, not an error
     filtered = filter_lookalikes(

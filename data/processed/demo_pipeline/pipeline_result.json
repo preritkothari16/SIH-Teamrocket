@@ -3,6 +3,13 @@
   "scene_id": "demo_pipeline",
   "stub_model": true,
   "ais_source": null,
+  "provenance": {
+    "sar_source": "local",
+    "sar_scene_id": "demo_pipeline",
+    "ais_source_label": null,
+    "wind_source": null,
+    "current_source": null
+  },
   "spills": [
     {
       "spill": {

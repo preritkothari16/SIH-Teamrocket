@@ -32,8 +32,10 @@ def test_get_environment_returns_both_when_both_are_configured(tmp_path: Path) -
     env = get_environment(20.0, 70.0, T0, settings=settings)
     assert env["wind"] is not None
     assert env["current"] is not None
-    assert env["wind"].u == pytest.approx(0.0)
-    assert env["current"].u == pytest.approx(0.0)
+    assert env["wind"].vector.u == pytest.approx(0.0)
+    assert env["current"].vector.u == pytest.approx(0.0)
+    assert env["wind"].source == "era5_fixture"
+    assert env["current"].source == "cmems_fixture"
 
 
 def test_get_environment_degrades_wind_alone_when_only_current_is_configured(

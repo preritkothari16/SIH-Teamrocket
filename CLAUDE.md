@@ -36,6 +36,8 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 5.4 dashboard | `src/output/dashboard.py` | **done** — FastAPI, one page, toggleable map layers, real-scene verified |
 | 5.5 backend API | `src/api/{main,models,registry}.py` | **done** — FastAPI, 5 endpoints, file-based registry, CORS |
 | 5.6 frontend | `frontend/src/` | **done** — Vite+TS SPA, cobe globe, run list, spill overlay, vessel drawer, real-scene verified |
+| 8.1 attribution Q&A | `src/attribution/qa.py`, `src/api/main.py` | **done, never called with a real key** — grounds an LLM answer in a run's existing scores/explanations, no new scoring; needs `ANTHROPIC_API_KEY`, unset here |
+| 8.2 data provenance | `scripts/run_pipeline.py`, `src/api/models.py`, `frontend/src/components/ProvenancePanel.ts` | **done** — `sar_source`/`sar_scene_id` come from data ingestion already carries; `wind_source`/`current_source` come from `get_wind()`/`get_current()`'s new `.source` field |
 
 `pytest` → 496 passing, ~55-60s, fully offline. Run it before believing anything here.
 
@@ -162,6 +164,56 @@ vessel tracks are each their own `folium.FeatureGroup` under one
 `folium.LayerControl`, so any one layer can be toggled off in the rendered
 map itself; this is what "layer toggle" means in step 5.4, not
 dashboard-specific code.
+
+Phase 8 (explainability/demo polish) is additive on top of a working system,
+done last, one step at a time — same working agreement as every other phase.
+
+- **8.1 attribution Q&A** (`src/attribution/qa.py` + `POST
+  /api/runs/{id}/ask` in `src/api/main.py`): no new detection/scoring —
+  `build_context()` serialises one run's spill/alert/ranked-vessels into a
+  text block reusing `scoring.py`'s own explanation strings verbatim, and
+  `answer_question()` sends that plus the caller's question to an Anthropic
+  model instructed to answer only from it, ending its reply with a
+  `CITED: <mmsi,...>` line that's parsed off into `cited_vessels` for the
+  UI. `run` is the same `{spill, alert, vessels, drift}` shape
+  `src/api/registry.py::get_run()` already returns — so a Postgres-backed
+  run (see `src/db.py`) has no vessels to cite; that table never stores
+  them, not a gap this step fixes. `QAError` (missing `anthropic` package or
+  `ANTHROPIC_API_KEY`) maps to a 503, not a 500 — the run's own data isn't
+  broken, the LLM just isn't reachable. **Never called against a real key
+  in this environment** — `tests/test_attribution_qa.py` mocks the LLM call
+  entirely (same treatment as the CDS/CMEMS fixtures below); no live
+  Anthropic response has ever been read back here.
+
+- **8.2 data provenance** (`scripts/run_pipeline.py::_provenance_payload`,
+  `src/api/models.py::Provenance`, `frontend/src/components/ProvenancePanel.ts`):
+  the combined output's new `provenance` object — `{sar_source,
+  sar_scene_id, ais_source_label, wind_source, current_source}` — needed no
+  new plumbing for the SAR fields: `scene.source.value` was already sitting
+  in `detection["properties"]["source"]` via
+  `characterization/spill_object.py::feature_collection()`'s own `extra`
+  (`scripts/run_detection.py`), just never read back out. `ais_source_label`
+  is a free-text `--ais-source-label` CLI flag (default `"unspecified"`) —
+  `src/ais/loader.py` stays deliberately source-agnostic, by design, and was
+  not touched. `wind_source`/`current_source` needed real plumbing:
+  `get_wind()`/`get_current()` (`src/env_data/{wind,currents}.py`) now
+  return an `EnvSample` (`src/env_data/grid.py`) — the same `EnvVector` as
+  before, plus a new `.source` field (`"era5_live"`/`"era5_fixture"`,
+  `"cmems_live"`/`"cmems_fixture"`) naming which path was actually taken.
+  Every existing caller (`src/env_data/service.py::get_environment()`,
+  `src/alerts/manager.py::process_spill()`, `src/drift/forward.py`,
+  `scripts/run_detection.py`) now reads `.vector.<field>` instead of the
+  field directly — mechanical, no behaviour change. `run_pipeline.py`
+  samples `get_environment()` **once more**, at the first spill's own
+  centroid/time, purely to label the run's `wind_source`/`current_source`;
+  the per-spill lookups inside the alert manager and drift forecaster are
+  untouched and still make their own separate calls. With no wind/current
+  dataset configured here (see Environment facts below), a real run reports
+  both as `null` — honest, not a bug. Frontend: `ProvenancePanel.ts` (same
+  `constructor(container)`/`render(run)`/`destroy()` shape as
+  `SpillOverlay.ts`) renders next to the spill overlay, sharing one
+  `flex-col justify-end` bottom-right stack in `index.html` so it sits above
+  the overlay regardless of the overlay's own dynamic height.
 
 ## Environment facts
 

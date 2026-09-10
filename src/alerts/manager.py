@@ -303,7 +303,7 @@ def process_spill(
 
     environment = get_environment(centroid.y, centroid.x, acquisition_time, settings=settings)
     wind = environment["wind"]
-    wind_speed_ms = wind.speed_ms if wind is not None else None
+    wind_speed_ms = wind.vector.speed_ms if wind is not None else None
 
     return evaluate_alert(
         spill, registry, wind_speed_ms=wind_speed_ms,

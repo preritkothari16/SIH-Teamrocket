@@ -49,5 +49,8 @@ stringzilla<4
 requests==2.34.2
 httpx>=0.23.0
 
+# --- LLM (Step 8.1: attribution Q&A) ---
+anthropic==0.120.0
+
 # --- image io (detection dataset) ---
 Pillow==12.3.0

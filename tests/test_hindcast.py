@@ -13,7 +13,7 @@ from shapely.geometry import box, mapping
 
 from src.config import load_settings
 from src.drift.hindcast import hindcast_origin, nearest_snapshot
-from src.env_data.grid import EnvVector
+from src.env_data.grid import EnvSample, EnvVector
 
 SPILL_POLYGON = box(70.0, 22.0, 70.05, 22.03)
 ACQUISITION_TIME = datetime(2024, 3, 1, 12, 0, tzinfo=timezone.utc)
@@ -27,8 +27,11 @@ def _spill_feature() -> dict:
     }
 
 
-def _vector(u: float, v: float, time: datetime) -> EnvVector:
-    return EnvVector(speed_ms=(u**2 + v**2) ** 0.5, direction_from_deg=0.0, u=u, v=v, time=time)
+def _vector(u: float, v: float, time: datetime) -> EnvSample:
+    return EnvSample(
+        vector=EnvVector(speed_ms=(u**2 + v**2) ** 0.5, direction_from_deg=0.0, u=u, v=v, time=time),
+        source="test",
+    )
 
 
 @pytest.fixture

@@ -188,6 +188,13 @@ def _get_run_postgres(scene_id: str, settings: Settings) -> Optional[Dict[str, A
         # Not columns on this table — see the module docstring.
         "vessels": [],
         "drift": {"forecast": [], "hindcast": []},
+        "provenance": {
+            "sar_source": None,
+            "sar_scene_id": row.scene_id,
+            "ais_source_label": None,
+            "wind_source": None,
+            "current_source": None,
+        },
     }
 
 
@@ -337,7 +344,9 @@ def _pipeline_to_contract(
         return _empty_contract(scene_id, data.get("generated_at", ""))
 
     target = _select_target_spill(spills)
-    return _spill_entry_to_contract(target, scene_id)
+    contract = _spill_entry_to_contract(target, scene_id)
+    contract["provenance"] = data.get("provenance")
+    return contract
 
 
 def _spill_entry_to_contract(
@@ -474,6 +483,16 @@ def _geojson_to_contract(data: Dict[str, Any], scene_id: str) -> Dict[str, Any]:
         "alert": alert,
         "vessels": [],
         "drift": {"forecast": [], "hindcast": []},
+        # Phase 1 has no combined pipeline_result.json - no provenance object
+        # was ever built for this run, only the sar_source this scene's own
+        # FeatureCollection.properties["source"] already carries.
+        "provenance": {
+            "sar_source": fc_props.get("source"),
+            "sar_scene_id": scene_id,
+            "ais_source_label": None,
+            "wind_source": None,
+            "current_source": None,
+        } if fc_props.get("source") else None,
     }
 
 
@@ -499,6 +518,7 @@ def _empty_contract(scene_id: str, ts: str) -> Dict[str, Any]:
         },
         "vessels": [],
         "drift": {"forecast": [], "hindcast": []},
+        "provenance": None,
     }
 
 

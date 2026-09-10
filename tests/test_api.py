@@ -376,7 +376,7 @@ class TestGetRunEndpoint:
         run = resp.json()
 
         # Top-level keys
-        assert set(run.keys()) == {"spill", "alert", "vessels", "drift"}
+        assert set(run.keys()) == {"spill", "alert", "vessels", "drift", "provenance"}
 
         # Spill fields
         spill = run["spill"]
@@ -446,3 +446,66 @@ class TestTriggerRunEndpoint:
     def test_400_without_scene_identifier(self) -> None:
         resp = client.post("/api/runs", json={})
         assert resp.status_code == 400
+
+
+class TestAskEndpoint:
+    """Step 8.1 — POST /api/runs/{id}/ask. The LLM call itself is exercised
+    in tests/test_attribution_qa.py; here we only check the endpoint's own
+    wiring (404 for an unknown run, the answer_question() call, error
+    mapping) against a real pipeline_result.json-backed run."""
+
+    def _write_scene_result(self, spills_dir: Path) -> None:
+        run_dir = spills_dir.parent / SCENE_ID
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "pipeline_result.json").write_text(
+            json.dumps(SAMPLE_PIPELINE_RESULT), encoding="utf-8"
+        )
+
+    def test_404_for_unknown_run(self, populated_spills: Path) -> None:
+        resp = client.post("/api/runs/no-such-scene/ask", json={"question": "who?"})
+        assert resp.status_code == 404
+
+    def test_answers_using_the_runs_own_data(
+        self, populated_spills: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._write_scene_result(populated_spills)
+
+        captured: Dict[str, Any] = {}
+
+        def fake_answer_question(run: Dict[str, Any], question: str, **kwargs: Any):
+            from src.attribution.qa import QAAnswer
+
+            captured["run"] = run
+            captured["question"] = question
+            return QAAnswer(answer="TANKER Gamma is the top match.", cited_vessels=["367123452"])
+
+        from src.api import main as main_mod
+
+        monkeypatch.setattr(main_mod, "answer_question", fake_answer_question)
+
+        resp = client.post(
+            f"/api/runs/{SCENE_ID}/ask",
+            json={"question": "which vessel is most likely responsible?"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["answer"] == "TANKER Gamma is the top match."
+        assert body["cited_vessels"] == ["367123452"]
+        assert captured["run"]["vessels"][0]["mmsi"] == "367123452"
+
+    def test_503_when_llm_unreachable(
+        self, populated_spills: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._write_scene_result(populated_spills)
+
+        from src.api import main as main_mod
+        from src.attribution.qa import QAError
+
+        def raise_qa_error(run: Dict[str, Any], question: str, **kwargs: Any):
+            raise QAError("ANTHROPIC_API_KEY not set - copy .env.example to .env and fill it in")
+
+        monkeypatch.setattr(main_mod, "answer_question", raise_qa_error)
+
+        resp = client.post(f"/api/runs/{SCENE_ID}/ask", json={"question": "who?"})
+        assert resp.status_code == 503
+        assert "ANTHROPIC_API_KEY" in resp.json()["detail"]

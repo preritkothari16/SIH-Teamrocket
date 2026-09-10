@@ -43,6 +43,7 @@ from src.config import Settings, get_settings
 from src.env_data.grid import (
     DatasetLike,
     EnvDataError,
+    EnvSample,
     EnvVector,
     as_utc_naive as _as_utc_naive,
     open_dataset as _open,
@@ -55,6 +56,12 @@ V_VAR = "vo"
 
 _KIND = "current dataset"
 
+#: EnvSample.source labels this module produces - mirrors src.env_data.wind's
+#: SOURCE_LIVE/SOURCE_FIXTURE; this environment has never taken the live path
+#: (no copernicusmarine package, no CMEMS credentials - see module docstring).
+SOURCE_LIVE = "cmems_live"
+SOURCE_FIXTURE = "cmems_fixture"
+
 
 def get_current(
     lat: float,
@@ -63,14 +70,17 @@ def get_current(
     dataset: Optional[DatasetLike] = None,
     method: Optional[str] = None,
     settings: Optional[Settings] = None,
-) -> EnvVector:
-    """Surface current vector at ``(lat, lon, time)``.
+) -> EnvSample:
+    """Surface current vector at ``(lat, lon, time)``, plus which path
+    produced it.
 
     ``dataset`` may be a path to a NetCDF file, an already-open
     :class:`xarray.Dataset`, or omitted to use
     ``env_data.current_dataset_path`` from the config. With neither a path
     nor an open dataset, falls back to fetching via Copernicus Marine if
-    credentials are configured - see :func:`fetch_cmems_current`.
+    credentials are configured - see :func:`fetch_cmems_current`. Either of
+    those two is reported back as ``.source`` (:data:`SOURCE_LIVE` or
+    :data:`SOURCE_FIXTURE`) alongside the ``.vector`` itself.
 
     Time uses nearest-neighbour lookup; space uses ``method`` (default
     ``env_data.interpolation_method``) - identical lookup shape to
@@ -80,10 +90,12 @@ def get_current(
     cfg = settings.env_data
     method = method or cfg.interpolation_method
 
+    source = SOURCE_FIXTURE
     if dataset is None:
         if cfg.current_dataset_path is not None:
             dataset = settings.paths.resolve(cfg.current_dataset_path)
         elif _cmems_credentials_available(settings):
+            source = SOURCE_LIVE
             cache_dir = settings.paths.resolve(settings.paths.env_dir)
             dataset = fetch_cmems_current(lat, lon, time, cache_dir, settings=settings)
         else:
@@ -95,9 +107,11 @@ def get_current(
             )
 
     if isinstance(dataset, xr.Dataset):
-        return lookup_vector(dataset, lat, lon, time, U_VAR, V_VAR, method=method, kind=_KIND)
-    with _open(dataset, kind=_KIND) as ds:
-        return lookup_vector(ds, lat, lon, time, U_VAR, V_VAR, method=method, kind=_KIND)
+        vector = lookup_vector(dataset, lat, lon, time, U_VAR, V_VAR, method=method, kind=_KIND)
+    else:
+        with _open(dataset, kind=_KIND) as ds:
+            vector = lookup_vector(ds, lat, lon, time, U_VAR, V_VAR, method=method, kind=_KIND)
+    return EnvSample(vector=vector, source=source)
 
 
 # --------------------------------------------------------------------------- #
@@ -154,4 +168,7 @@ def fetch_cmems_current(
     return target
 
 
-__all__ = ["EnvDataError", "EnvVector", "get_current", "fetch_cmems_current"]
+__all__ = [
+    "EnvDataError", "EnvVector", "EnvSample", "SOURCE_LIVE", "SOURCE_FIXTURE",
+    "get_current", "fetch_cmems_current",
+]

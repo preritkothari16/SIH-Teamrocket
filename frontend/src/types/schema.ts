@@ -70,9 +70,18 @@ export interface DriftHindcast {
   hindcast: HindcastEntry[]
 }
 
+export interface Provenance {
+  sar_source: string | null
+  sar_scene_id: string | null
+  ais_source_label: string | null
+  wind_source: string | null
+  current_source: string | null
+}
+
 export interface PipelineRun {
   spill: SpillObject
   alert: Alert
   vessels: Vessel[]
   drift: DriftForecast & DriftHindcast
+  provenance: Provenance | null
 }

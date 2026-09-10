@@ -47,6 +47,24 @@ class EnvVector:
     time: datetime  # the grid time actually used (nearest match), UTC
 
 
+@dataclass
+class EnvSample:
+    """One :class:`EnvVector` plus which data path produced it.
+
+    :func:`lookup_vector` itself stays source-agnostic - it has no idea
+    whether the dataset it just read came from a live fetch or a local
+    fixture. That decision is made one level up, in
+    :mod:`src.env_data.wind`/:mod:`src.env_data.currents`'s own
+    ``get_wind()``/``get_current()``, which is the only place that knows -
+    so they wrap their :class:`EnvVector` result in this before returning it.
+    ``source`` is one of each module's own labels (e.g. ``"era5_live"`` /
+    ``"era5_fixture"``, ``"cmems_live"`` / ``"cmems_fixture"``).
+    """
+
+    vector: EnvVector
+    source: str
+
+
 def as_utc_naive(value: datetime) -> datetime:
     """NetCDF time coordinates are naive (no tz); ERA5/CMEMS/HYCOM all use
     UTC, so an aware input is converted to UTC and stripped, and a naive one
@@ -130,6 +148,7 @@ __all__ = [
     "DatasetLike",
     "EnvDataError",
     "EnvVector",
+    "EnvSample",
     "as_utc_naive",
     "direction_from_deg",
     "open_dataset",

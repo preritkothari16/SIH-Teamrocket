@@ -87,8 +87,11 @@
         <div id="run-list" class="flex-1 overflow-y-auto"></div>
       </aside>
 
-      <!-- SpillOverlay: bottom-right detail card -->
-      <div id="spill-overlay" class="absolute bottom-4 right-4 z-20 w-96 max-h-[65vh] overflow-y-auto"></div>
+      <!-- SpillOverlay + ProvenancePanel: bottom-right detail stack -->
+      <div class="absolute bottom-4 right-4 z-20 w-96 max-h-[85vh] flex flex-col justify-end gap-3 overflow-y-auto">
+        <div id="provenance-panel"></div>
+        <div id="spill-overlay"></div>
+      </div>
 
       <!-- VesselDrawer: bottom drawer -->
       <div id="vessel-drawer" class="absolute bottom-0 left-0 right-0 z-20 bg-zinc-900/98 backdrop-blur-xl border-t border-zinc-800/50 transition-transform duration-300 translate-y-full">

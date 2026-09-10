@@ -75,8 +75,8 @@ def sample_environment_vectors(
             lat, lon, time,
         )
 
-    wind_uv = (wind.u, wind.v) if wind is not None else (0.0, 0.0)
-    current_uv = (current.u, current.v) if current is not None else (0.0, 0.0)
+    wind_uv = (wind.vector.u, wind.vector.v) if wind is not None else (0.0, 0.0)
+    current_uv = (current.vector.u, current.vector.v) if current is not None else (0.0, 0.0)
     return wind_uv, current_uv
 
 
