@@ -1,6 +1,7 @@
 import { SpillGlobe } from './components/ui/SpillGlobe';
 import { RunList } from './components/RunList';
 import { SpillOverlay } from './components/SpillOverlay';
+import { ProvenancePanel } from './components/ProvenancePanel';
 import { VesselDrawer } from './components/VesselDrawer';
 import { listRuns, getRun, getReport } from './api/client';
 import type { PipelineRun } from './types/schema';
@@ -11,6 +12,7 @@ export class App {
   private globe: SpillGlobe;
   private runList: RunList;
   private spillOverlay: SpillOverlay;
+  private provenancePanel: ProvenancePanel;
   private vesselDrawer: VesselDrawer;
   private allRuns: PipelineRun[] = [];
 
@@ -26,6 +28,7 @@ export class App {
     const globeCanvas = document.getElementById('globe-canvas') as HTMLCanvasElement;
     const runListEl = document.getElementById('run-list')!;
     const overlayEl = document.getElementById('spill-overlay')!;
+    const provenanceEl = document.getElementById('provenance-panel')!;
     const drawerEl = document.getElementById('vessel-drawer')!;
 
     this.runListPanel = document.getElementById('run-list-panel')!;
@@ -44,6 +47,7 @@ export class App {
     });
 
     this.spillOverlay = new SpillOverlay(overlayEl);
+    this.provenancePanel = new ProvenancePanel(provenanceEl);
     this.vesselDrawer = new VesselDrawer(drawerEl);
 
     this.init();
@@ -116,6 +120,7 @@ export class App {
 
     if (runId === null) {
       this.spillOverlay.render(null);
+      this.provenancePanel.render(null);
       this.vesselDrawer.hide();
       this.globeHint.style.opacity = '1';
       this.selectedSceneId = null;
@@ -129,6 +134,7 @@ export class App {
     if (!run) return;
 
     this.spillOverlay.render(run);
+    this.provenancePanel.render(run);
     this.vesselDrawer.render(run.vessels);
     this.globeHint.style.opacity = '0';
     this.selectedSceneId = run.spill.scene_id;
@@ -211,6 +217,7 @@ export class App {
     this.globe.destroy();
     this.runList.destroy();
     this.spillOverlay.destroy();
+    this.provenancePanel.destroy();
     this.vesselDrawer.destroy();
   }
 }

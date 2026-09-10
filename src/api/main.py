@@ -6,6 +6,7 @@ GET  /api/runs              — list all processed runs (summary)
 GET  /api/runs/{id}         — full PipelineRun contract for one scene
 GET  /api/runs/{id}/report  — Step 5.3 report file (404 if not generated)
 POST /api/runs              — trigger detection on a scene (sync, hackathon)
+POST /api/runs/{id}/ask     — Step 8.1 natural-language Q&A over a run
 
 CORS is configured for the Vite dev server at http://localhost:5173.
 
@@ -26,8 +27,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from src.api.models import PipelineRun, RunRequest, RunSummary
+from src.api.models import AskRequest, AskResponse, PipelineRun, RunRequest, RunSummary
 from src.api.registry import get_report_path, get_run, list_runs
+from src.attribution.qa import QAError, answer_question
 from src.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
@@ -146,6 +148,25 @@ def api_trigger_run(request: RunRequest) -> PipelineRun:
         )
 
     return PipelineRun(**run)
+
+
+@app.post("/api/runs/{scene_id}/ask", response_model=AskResponse)
+def api_ask_run(scene_id: str, request: AskRequest) -> AskResponse:
+    """Answer a natural-language question about one run (Step 8.1).
+
+    Purely explanatory — grounded in that run's already-computed spill/
+    alert/vessel data, no new detection or scoring. 503 (not 500) when the
+    LLM itself can't be reached, since that's a missing package/credential,
+    not this run's data being broken.
+    """
+    run = get_run(scene_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run '{scene_id}' not found")
+    try:
+        result = answer_question(run, request.question)
+    except QAError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return AskResponse(answer=result.answer, cited_vessels=result.cited_vessels)
 
 
 @app.get("/api/health")

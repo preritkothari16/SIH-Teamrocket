@@ -43,6 +43,7 @@ from src.alerts.registry import SpillRegistry  # noqa: E402
 from src.config import Settings, get_settings  # noqa: E402
 from src.drift.forward import forecast_drift  # noqa: E402
 from src.drift.hindcast import hindcast_origin  # noqa: E402
+from src.env_data.service import get_environment  # noqa: E402
 from src.output.map import MapBuildError, save_map  # noqa: E402
 from src.output.report import ReportBuildError, save_report  # noqa: E402
 
@@ -66,12 +67,57 @@ def _drift_forecast_payload(spill: Dict[str, Any], settings: Settings) -> List[D
     ]
 
 
+def _provenance_payload(
+    detection: Dict[str, Any],
+    scene_id_resolved: Optional[str],
+    spills: List[Dict[str, Any]],
+    ais_path: Optional[Path],
+    ais_source_label: str,
+    settings: Settings,
+) -> Dict[str, Any]:
+    """What actually produced this run - see the Step 8.2 brief for what was
+    checked before writing this.
+
+    ``sar_source`` ("cdse"|"local") is already sitting in
+    ``detection["properties"]["source"]`` -
+    :func:`scripts.run_detection.run` puts ``scene.source.value`` there via
+    :func:`src.characterization.spill_object.feature_collection`'s own
+    ``extra`` - no new plumbing needed. ``wind_source``/``current_source``
+    are sampled once, at the first spill's centroid/time, purely to label
+    this run - the per-spill env lookups inside :mod:`src.alerts.manager`
+    and :mod:`src.drift.forward` are unaffected and unchanged.
+    """
+    properties = detection.get("properties") or {}
+    provenance: Dict[str, Any] = {
+        "sar_source": properties.get("source"),
+        "sar_scene_id": scene_id_resolved,
+        "ais_source_label": ais_source_label if ais_path else None,
+        "wind_source": None,
+        "current_source": None,
+    }
+
+    if spills:
+        first_props = spills[0].get("properties", {}) or {}
+        lon, lat = first_props.get("centroid_lon"), first_props.get("centroid_lat")
+        timestamp = first_props.get("acquisition_timestamp")
+        if lon is not None and lat is not None and timestamp:
+            environment = get_environment(
+                float(lat), float(lon), datetime.fromisoformat(timestamp), settings=settings,
+            )
+            wind, current = environment["wind"], environment["current"]
+            provenance["wind_source"] = wind.source if wind is not None else None
+            provenance["current_source"] = current.source if current is not None else None
+
+    return provenance
+
+
 def run(
     scene_id: Optional[str] = None,
     scene_path: Optional[Path] = None,
     checkpoint: Optional[Path] = None,
     stub_model: bool = False,
     ais_path: Optional[Path] = None,
+    ais_source_label: str = "unspecified",
     tile_size: Optional[int] = None,
     overlap: Optional[int] = None,
     reuse_tiles: bool = False,
@@ -88,6 +134,13 @@ def run(
     ``ais_path`` is optional: without it, an alerted spill still gets a full
     alert decision, just an empty vessel list rather than a crash - useful
     for running the pipeline before any AIS export is on hand.
+    ``ais_source_label`` (step 8.2) is a free-text label for *which* export
+    ``ais_path`` is (e.g. "NOAA Office for Coastal Management historical
+    AIS") - :mod:`src.ais.loader` is deliberately source-agnostic and cannot
+    report this itself, so it is threaded straight into the combined
+    output's ``provenance`` object instead. Defaults to "unspecified", not
+    None, so a provenance panel always has something to show once an AIS
+    export was actually given.
 
     Every spill also gets a forward drift forecast (step 4.3, 6/12/24/48h -
     see :mod:`src.drift.forward`), independent of AIS/alert status, since it
@@ -168,6 +221,9 @@ def run(
         "scene_id": scene_id_resolved,
         "stub_model": bool(stub_model),
         "ais_source": str(ais_path) if ais_path else None,
+        "provenance": _provenance_payload(
+            detection, scene_id_resolved, spills, ais_path, ais_source_label, settings,
+        ),
         "spills": results,
     }
 
@@ -211,6 +267,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="threshold stand-in, for wiring checks before training")
     parser.add_argument("--ais", dest="ais_path", type=Path, default=None,
                         help="AIS export (.csv or .parquet); omit to skip attribution")
+    parser.add_argument("--ais-source-label", type=str, default="unspecified",
+                        help="free-text label for --ais's provenance (e.g. 'NOAA "
+                             "Office for Coastal Management historical AIS')")
     parser.add_argument("--tile-size", type=int, default=None)
     parser.add_argument("--overlap", type=int, default=None)
     parser.add_argument("--reuse-tiles", action="store_true",
@@ -240,6 +299,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         checkpoint=args.checkpoint,
         stub_model=args.stub_model,
         ais_path=args.ais_path,
+        ais_source_label=args.ais_source_label,
         tile_size=args.tile_size,
         overlap=args.overlap,
         reuse_tiles=args.reuse_tiles,

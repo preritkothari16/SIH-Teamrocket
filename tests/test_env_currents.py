@@ -16,7 +16,7 @@ import pytest
 import xarray as xr
 
 from src.config import load_settings
-from src.env_data.currents import EnvDataError, EnvVector, get_current
+from src.env_data.currents import EnvDataError, EnvSample, EnvVector, SOURCE_FIXTURE, get_current
 
 LATS = np.array([21.0, 20.0, 19.0])  # descending, matching real CMEMS
 LONS = np.array([69.0, 70.0, 71.0])
@@ -61,17 +61,17 @@ T1 = datetime(2023, 5, 13, 1, 0, 0, tzinfo=timezone.utc)
 # --------------------------------------------------------------------------- #
 def test_get_current_at_a_grid_node_matches_that_nodes_value(current_fixture: Path) -> None:
     current = get_current(20.0, 70.0, T0, dataset=current_fixture)
-    assert current.u == pytest.approx(0.0)
-    assert current.v == pytest.approx(0.0)
-    assert current.speed_ms == pytest.approx(0.0)
+    assert current.vector.u == pytest.approx(0.0)
+    assert current.vector.v == pytest.approx(0.0)
+    assert current.vector.speed_ms == pytest.approx(0.0)
 
 
 def test_get_current_at_a_non_zero_grid_node(current_fixture: Path) -> None:
     """lat=21 (north edge), lon=71 (east edge): u=(71-70)*0.5=0.5, v=(21-20)*0.3=0.3."""
     current = get_current(21.0, 71.0, T0, dataset=current_fixture)
-    assert current.u == pytest.approx(0.5)
-    assert current.v == pytest.approx(0.3)
-    assert current.speed_ms == pytest.approx((0.5**2 + 0.3**2) ** 0.5)
+    assert current.vector.u == pytest.approx(0.5)
+    assert current.vector.v == pytest.approx(0.3)
+    assert current.vector.speed_ms == pytest.approx((0.5**2 + 0.3**2) ** 0.5)
 
 
 # --------------------------------------------------------------------------- #
@@ -79,14 +79,14 @@ def test_get_current_at_a_non_zero_grid_node(current_fixture: Path) -> None:
 # --------------------------------------------------------------------------- #
 def test_get_current_interpolates_linearly_between_nodes(current_fixture: Path) -> None:
     current = get_current(20.5, 70.5, T0, dataset=current_fixture)
-    assert current.u == pytest.approx(0.25)  # (70.5-70)*0.5
-    assert current.v == pytest.approx(0.15)  # (20.5-20)*0.3
+    assert current.vector.u == pytest.approx(0.25)  # (70.5-70)*0.5
+    assert current.vector.v == pytest.approx(0.15)  # (20.5-20)*0.3
 
 
 def test_get_current_nearest_method_snaps_to_the_closer_node(current_fixture: Path) -> None:
     current = get_current(20.5, 70.5, T0, dataset=current_fixture, method="nearest")
-    assert current.u in (0.0, 0.5)
-    assert current.v in (0.0, 0.3)
+    assert current.vector.u in (0.0, 0.5)
+    assert current.vector.v in (0.0, 0.3)
 
 
 def test_get_current_rejects_a_latitude_outside_the_grid(current_fixture: Path) -> None:
@@ -105,21 +105,21 @@ def test_get_current_rejects_a_longitude_outside_the_grid(current_fixture: Path)
 def test_get_current_snaps_to_the_nearest_hour(current_fixture: Path) -> None:
     just_after_t0 = datetime(2023, 5, 13, 0, 10, 0, tzinfo=timezone.utc)
     current = get_current(20.0, 70.0, just_after_t0, dataset=current_fixture)
-    assert current.time == T0
-    assert current.u == pytest.approx(0.0)
+    assert current.vector.time == T0
+    assert current.vector.u == pytest.approx(0.0)
 
     just_before_t1 = datetime(2023, 5, 13, 0, 50, 0, tzinfo=timezone.utc)
     current = get_current(20.0, 70.0, just_before_t1, dataset=current_fixture)
-    assert current.time == T1
-    assert current.u == pytest.approx(0.1)
+    assert current.vector.time == T1
+    assert current.vector.u == pytest.approx(0.1)
 
 
 def test_get_current_accepts_a_naive_datetime_as_utc(current_fixture: Path) -> None:
     naive = datetime(2023, 5, 13, 0, 0, 0)
     aware = get_current(20.0, 70.0, T0, dataset=current_fixture)
     naive_result = get_current(20.0, 70.0, naive, dataset=current_fixture)
-    assert naive_result.u == pytest.approx(aware.u)
-    assert naive_result.time == T0
+    assert naive_result.vector.u == pytest.approx(aware.vector.u)
+    assert naive_result.vector.time == T0
 
 
 # --------------------------------------------------------------------------- #
@@ -128,8 +128,9 @@ def test_get_current_accepts_a_naive_datetime_as_utc(current_fixture: Path) -> N
 def test_get_current_accepts_an_already_open_dataset(current_fixture: Path) -> None:
     with xr.open_dataset(current_fixture) as ds:
         current = get_current(20.0, 70.0, T0, dataset=ds)
-    assert isinstance(current, EnvVector)
-    assert current.u == pytest.approx(0.0)
+    assert isinstance(current, EnvSample)
+    assert isinstance(current.vector, EnvVector)
+    assert current.vector.u == pytest.approx(0.0)
 
 
 def test_get_current_uses_the_configured_dataset_path_when_omitted(current_fixture: Path) -> None:
@@ -140,7 +141,7 @@ def test_get_current_uses_the_configured_dataset_path_when_omitted(current_fixtu
         )}
     )
     current = get_current(20.0, 70.0, T0, settings=settings)
-    assert current.u == pytest.approx(0.0)
+    assert current.vector.u == pytest.approx(0.0)
 
 
 def test_get_current_raises_a_clear_error_with_no_source_configured() -> None:
@@ -152,3 +153,24 @@ def test_get_current_raises_a_clear_error_with_no_source_configured() -> None:
 def test_get_current_reports_a_missing_file_clearly(tmp_path: Path) -> None:
     with pytest.raises(EnvDataError, match="no current dataset at"):
         get_current(20.0, 70.0, T0, dataset=tmp_path / "missing.nc")
+
+
+# --------------------------------------------------------------------------- #
+# .source - which path actually produced this sample (Step 8.2 provenance)
+# --------------------------------------------------------------------------- #
+def test_get_current_reports_fixture_source_for_an_explicit_dataset(current_fixture: Path) -> None:
+    current = get_current(20.0, 70.0, T0, dataset=current_fixture)
+    assert current.source == SOURCE_FIXTURE
+
+
+def test_get_current_reports_fixture_source_for_the_configured_dataset_path(
+    current_fixture: Path,
+) -> None:
+    settings = load_settings()
+    settings = settings.model_copy(
+        update={"env_data": settings.env_data.model_copy(
+            update={"current_dataset_path": current_fixture}
+        )}
+    )
+    current = get_current(20.0, 70.0, T0, settings=settings)
+    assert current.source == SOURCE_FIXTURE

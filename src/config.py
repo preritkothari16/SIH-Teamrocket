@@ -114,6 +114,7 @@ class CredentialsConfig(BaseModel):
     cmems_username_env: str = "CMEMS_USERNAME"
     cmems_password_env: str = "CMEMS_PASSWORD"
     database_url_env: str = "DATABASE_URL"
+    anthropic_api_key_env: str = "ANTHROPIC_API_KEY"
 
     def resolve(self, required: bool = False) -> Dict[str, Optional[str]]:
         """Read the actual secrets out of the environment.

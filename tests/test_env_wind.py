@@ -15,7 +15,14 @@ import pytest
 import xarray as xr
 
 from src.config import load_settings
-from src.env_data.wind import EnvDataError, EnvVector, _direction_from_deg, get_wind
+from src.env_data.wind import (
+    EnvDataError,
+    EnvSample,
+    EnvVector,
+    SOURCE_FIXTURE,
+    _direction_from_deg,
+    get_wind,
+)
 
 LATS = np.array([21.0, 20.0, 19.0])  # descending, matching real ERA5
 LONS = np.array([69.0, 70.0, 71.0])
@@ -60,17 +67,17 @@ T1 = datetime(2023, 5, 13, 1, 0, 0, tzinfo=timezone.utc)
 # --------------------------------------------------------------------------- #
 def test_get_wind_at_a_grid_node_matches_that_nodes_value(wind_fixture: Path) -> None:
     wind = get_wind(20.0, 70.0, T0, dataset=wind_fixture)
-    assert wind.u == pytest.approx(0.0)
-    assert wind.v == pytest.approx(0.0)
-    assert wind.speed_ms == pytest.approx(0.0)
+    assert wind.vector.u == pytest.approx(0.0)
+    assert wind.vector.v == pytest.approx(0.0)
+    assert wind.vector.speed_ms == pytest.approx(0.0)
 
 
 def test_get_wind_at_a_non_zero_grid_node(wind_fixture: Path) -> None:
     """lat=21 (north edge), lon=71 (east edge): u=(71-70)*2=2, v=(21-20)*3=3."""
     wind = get_wind(21.0, 71.0, T0, dataset=wind_fixture)
-    assert wind.u == pytest.approx(2.0)
-    assert wind.v == pytest.approx(3.0)
-    assert wind.speed_ms == pytest.approx((2.0**2 + 3.0**2) ** 0.5)
+    assert wind.vector.u == pytest.approx(2.0)
+    assert wind.vector.v == pytest.approx(3.0)
+    assert wind.vector.speed_ms == pytest.approx((2.0**2 + 3.0**2) ** 0.5)
 
 
 # --------------------------------------------------------------------------- #
@@ -78,16 +85,16 @@ def test_get_wind_at_a_non_zero_grid_node(wind_fixture: Path) -> None:
 # --------------------------------------------------------------------------- #
 def test_get_wind_interpolates_linearly_between_nodes(wind_fixture: Path) -> None:
     wind = get_wind(20.5, 70.5, T0, dataset=wind_fixture)
-    assert wind.u == pytest.approx(1.0)  # (70.5-70)*2
-    assert wind.v == pytest.approx(1.5)  # (20.5-20)*3
+    assert wind.vector.u == pytest.approx(1.0)  # (70.5-70)*2
+    assert wind.vector.v == pytest.approx(1.5)  # (20.5-20)*3
 
 
 def test_get_wind_nearest_method_snaps_to_the_closer_node(wind_fixture: Path) -> None:
     wind = get_wind(20.5, 70.5, T0, dataset=wind_fixture, method="nearest")
     # nearest of (19,20,21) to 20.5 is 20 or 21 depending on tie-break; either
     # way the result must be one of the exact grid values, not an average.
-    assert wind.u in (0.0, 2.0)
-    assert wind.v in (0.0, 3.0)
+    assert wind.vector.u in (0.0, 2.0)
+    assert wind.vector.v in (0.0, 3.0)
 
 
 def test_get_wind_rejects_a_latitude_outside_the_grid(wind_fixture: Path) -> None:
@@ -106,21 +113,21 @@ def test_get_wind_rejects_a_longitude_outside_the_grid(wind_fixture: Path) -> No
 def test_get_wind_snaps_to_the_nearest_hour(wind_fixture: Path) -> None:
     just_after_t0 = datetime(2023, 5, 13, 0, 10, 0, tzinfo=timezone.utc)
     wind = get_wind(20.0, 70.0, just_after_t0, dataset=wind_fixture)
-    assert wind.time == T0
-    assert wind.u == pytest.approx(0.0)  # t0's value, not blended with t1
+    assert wind.vector.time == T0
+    assert wind.vector.u == pytest.approx(0.0)  # t0's value, not blended with t1
 
     just_before_t1 = datetime(2023, 5, 13, 0, 50, 0, tzinfo=timezone.utc)
     wind = get_wind(20.0, 70.0, just_before_t1, dataset=wind_fixture)
-    assert wind.time == T1
-    assert wind.u == pytest.approx(1.0)  # t1's step, not t0's
+    assert wind.vector.time == T1
+    assert wind.vector.u == pytest.approx(1.0)  # t1's step, not t0's
 
 
 def test_get_wind_accepts_a_naive_datetime_as_utc(wind_fixture: Path) -> None:
     naive = datetime(2023, 5, 13, 0, 0, 0)
     aware = get_wind(20.0, 70.0, T0, dataset=wind_fixture)
     naive_result = get_wind(20.0, 70.0, naive, dataset=wind_fixture)
-    assert naive_result.u == pytest.approx(aware.u)
-    assert naive_result.time == T0
+    assert naive_result.vector.u == pytest.approx(aware.vector.u)
+    assert naive_result.vector.time == T0
 
 
 # --------------------------------------------------------------------------- #
@@ -154,8 +161,9 @@ def test_direction_is_undefined_but_finite_for_zero_wind() -> None:
 def test_get_wind_accepts_an_already_open_dataset(wind_fixture: Path) -> None:
     with xr.open_dataset(wind_fixture) as ds:
         wind = get_wind(20.0, 70.0, T0, dataset=ds)
-    assert isinstance(wind, EnvVector)
-    assert wind.u == pytest.approx(0.0)
+    assert isinstance(wind, EnvSample)
+    assert isinstance(wind.vector, EnvVector)
+    assert wind.vector.u == pytest.approx(0.0)
 
 
 def test_get_wind_uses_the_configured_dataset_path_when_omitted(wind_fixture: Path) -> None:
@@ -166,7 +174,7 @@ def test_get_wind_uses_the_configured_dataset_path_when_omitted(wind_fixture: Pa
         )}
     )
     wind = get_wind(20.0, 70.0, T0, settings=settings)
-    assert wind.u == pytest.approx(0.0)
+    assert wind.vector.u == pytest.approx(0.0)
 
 
 def test_get_wind_raises_a_clear_error_with_no_source_configured() -> None:
@@ -178,3 +186,24 @@ def test_get_wind_raises_a_clear_error_with_no_source_configured() -> None:
 def test_get_wind_reports_a_missing_file_clearly(tmp_path: Path) -> None:
     with pytest.raises(EnvDataError, match="no wind dataset at"):
         get_wind(20.0, 70.0, T0, dataset=tmp_path / "missing.nc")
+
+
+# --------------------------------------------------------------------------- #
+# .source - which path actually produced this sample (Step 8.2 provenance)
+# --------------------------------------------------------------------------- #
+def test_get_wind_reports_fixture_source_for_an_explicit_dataset(wind_fixture: Path) -> None:
+    wind = get_wind(20.0, 70.0, T0, dataset=wind_fixture)
+    assert wind.source == SOURCE_FIXTURE
+
+
+def test_get_wind_reports_fixture_source_for_the_configured_dataset_path(
+    wind_fixture: Path,
+) -> None:
+    settings = load_settings()
+    settings = settings.model_copy(
+        update={"env_data": settings.env_data.model_copy(
+            update={"wind_dataset_path": wind_fixture}
+        )}
+    )
+    wind = get_wind(20.0, 70.0, T0, settings=settings)
+    assert wind.source == SOURCE_FIXTURE

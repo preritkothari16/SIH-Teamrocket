@@ -44,6 +44,7 @@ from src.config import Settings, get_settings
 from src.env_data.grid import (
     DatasetLike,
     EnvDataError,
+    EnvSample,
     EnvVector,
     as_utc_naive as _as_utc_naive,
     direction_from_deg as _direction_from_deg,
@@ -59,6 +60,12 @@ V_VAR = "v10"
 #: grid.py extraction, so existing error-matching tests still pass.
 _KIND = "wind dataset"
 
+#: EnvSample.source labels this module produces - a real CDS fetch, or a
+#: local dataset (whether explicitly passed in or picked up from config;
+#: this environment has never taken the live path - see module docstring).
+SOURCE_LIVE = "era5_live"
+SOURCE_FIXTURE = "era5_fixture"
+
 
 def get_wind(
     lat: float,
@@ -67,14 +74,16 @@ def get_wind(
     dataset: Optional[DatasetLike] = None,
     method: Optional[str] = None,
     settings: Optional[Settings] = None,
-) -> EnvVector:
-    """Wind vector at ``(lat, lon, time)``.
+) -> EnvSample:
+    """Wind vector at ``(lat, lon, time)``, plus which path produced it.
 
     ``dataset`` may be a path to a NetCDF file, an already-open
     :class:`xarray.Dataset` (so a caller looking up many points can open it
     once), or omitted to use ``env_data.wind_dataset_path`` from the config.
     With neither a path nor an open dataset, falls back to fetching ERA5 via
     the CDS API if credentials are configured - see :func:`fetch_era5_wind`.
+    Either of those two is reported back as ``.source`` (:data:`SOURCE_LIVE`
+    or :data:`SOURCE_FIXTURE`) alongside the ``.vector`` itself.
 
     Time uses nearest-neighbour lookup (ERA5 is hourly; blending across
     hours isn't physically meaningful the way spatial blending is).
@@ -85,10 +94,12 @@ def get_wind(
     cfg = settings.env_data
     method = method or cfg.interpolation_method
 
+    source = SOURCE_FIXTURE
     if dataset is None:
         if cfg.wind_dataset_path is not None:
             dataset = settings.paths.resolve(cfg.wind_dataset_path)
         elif _cds_credentials_available(settings):
+            source = SOURCE_LIVE
             cache_dir = settings.paths.resolve(settings.paths.env_dir)
             dataset = fetch_era5_wind(lat, lon, time, cache_dir, settings=settings)
         else:
@@ -99,9 +110,11 @@ def get_wind(
             )
 
     if isinstance(dataset, xr.Dataset):
-        return lookup_vector(dataset, lat, lon, time, U_VAR, V_VAR, method=method, kind=_KIND)
-    with _open(dataset, kind=_KIND) as ds:
-        return lookup_vector(ds, lat, lon, time, U_VAR, V_VAR, method=method, kind=_KIND)
+        vector = lookup_vector(dataset, lat, lon, time, U_VAR, V_VAR, method=method, kind=_KIND)
+    else:
+        with _open(dataset, kind=_KIND) as ds:
+            vector = lookup_vector(ds, lat, lon, time, U_VAR, V_VAR, method=method, kind=_KIND)
+    return EnvSample(vector=vector, source=source)
 
 
 # --------------------------------------------------------------------------- #
@@ -165,6 +178,9 @@ def fetch_era5_wind(
 __all__ = [
     "EnvDataError",
     "EnvVector",
+    "EnvSample",
+    "SOURCE_LIVE",
+    "SOURCE_FIXTURE",
     "get_wind",
     "fetch_era5_wind",
 ]

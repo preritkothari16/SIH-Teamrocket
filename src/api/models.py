@@ -108,6 +108,17 @@ class Drift(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Provenance (Step 8.2)
+# --------------------------------------------------------------------------- #
+class Provenance(BaseModel):
+    sar_source: Optional[str] = None
+    sar_scene_id: Optional[str] = None
+    ais_source_label: Optional[str] = None
+    wind_source: Optional[str] = None
+    current_source: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- #
 # PipelineRun — the top-level contract
 # --------------------------------------------------------------------------- #
 class PipelineRun(BaseModel):
@@ -115,6 +126,7 @@ class PipelineRun(BaseModel):
     alert: Alert
     vessels: List[Vessel] = Field(default_factory=list)
     drift: Drift = Field(default_factory=Drift)
+    provenance: Optional[Provenance] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -135,3 +147,15 @@ class RunRequest(BaseModel):
     scene_path: Optional[str] = None
     scene_id: Optional[str] = None
     stub_model: bool = True
+
+
+# --------------------------------------------------------------------------- #
+# Attribution Q&A (Step 8.1)
+# --------------------------------------------------------------------------- #
+class AskRequest(BaseModel):
+    question: str
+
+
+class AskResponse(BaseModel):
+    answer: str
+    cited_vessels: List[str] = Field(default_factory=list)
