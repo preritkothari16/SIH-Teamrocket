@@ -1,15 +1,27 @@
-"""File-based spill registry.
+"""Spill registry backing the frontend API.
 
-Scans ``data/processed/`` for pipeline outputs.  Two sources are supported:
+Three sources are supported, in priority order:
 
-1. **``<scene_id>/pipeline_result.json``** — the full Phase 3 combined output
-   from ``scripts/run_pipeline.py``.  Contains spills, alert decisions, and
-   scored vessels.
-2. **``spills/<scene_id>.geojson``** — Phase 1-only FeatureCollection from
-   ``scripts/run_detection.py``.  No alerts, no vessels.
+1. **Postgres ``spills`` table** (``src/db.py``) — used whenever
+   ``DATABASE_URL`` is configured (see :func:`src.db.database_url`). This is
+   the only source that survives a stateless deploy (Render, etc.): the
+   other two read the local filesystem, which a fresh container doesn't
+   have. One row per *alerted* spill (see ``src/alerts/registry.py`` — the
+   only thing that ever writes to this table); vessels and drift are not
+   columns on it, so a Postgres-backed run always reports an empty vessel
+   list and empty drift, regardless of what the original pipeline run found.
+2. **``<scene_id>/pipeline_result.json``** — the full Phase 3 combined
+   output from ``scripts/run_pipeline.py``, read straight off
+   ``data/processed/`` (local dev only). Contains spills, alert decisions,
+   scored vessels, and the drift forecast.
+3. **``spills/<scene_id>.geojson``** — Phase 1-only FeatureCollection from
+   ``scripts/run_detection.py`` (also local-disk only). No alerts, no
+   vessels, no drift.
 
-Source 1 takes priority when both exist for the same scene.  The conversion
-to the frontend ``PipelineRun`` contract happens here.
+When no ``DATABASE_URL`` is set, only 2 and 3 apply, exactly as before this
+module knew about Postgres at all — nothing here changes local, offline
+development. Source 2 takes priority over 3 when both exist for the same
+scene. The conversion to the frontend ``PipelineRun`` contract happens here.
 """
 
 from __future__ import annotations
@@ -21,6 +33,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.config import Settings, get_settings
+from src.db import database_url, map_alert_status
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +76,10 @@ def _find_geojson_spills(settings: Settings) -> Dict[str, Path]:
 def list_runs(settings: Optional[Settings] = None) -> List[Dict[str, Any]]:
     """Return one summary dict per processed scene."""
     settings = settings or get_settings()
+
+    if database_url(settings):
+        return _list_runs_postgres(settings)
+
     summaries: List[Dict[str, Any]] = []
 
     # Source 1: pipeline_result.json (Phase 3 output)
@@ -88,23 +105,95 @@ def list_runs(settings: Optional[Settings] = None) -> List[Dict[str, Any]]:
     return summaries
 
 
-#: Backend ``AlertDecision.status`` (see ``src/alerts/manager.py``) is always
-#: one of "active"/"possible"/"rejected". The frontend contract's status
-#: vocabulary is richer ("new"/"update"/"possible"/"none" — "update" reserved
-#: for a future re-detection-of-an-existing-spill case, not produced by this
-#: mapping yet). Both the list endpoint and the detail endpoint must run a
-#: spill's raw status through this *same* mapping — they disagreed before
-#: because only the detail endpoint did.
-_STATUS_MAP = {
-    "active": "new",
-    "possible": "possible",
-    "rejected": "none",
-}
+# --------------------------------------------------------------------------- #
+# Postgres source (src/db.py's spills table)
+# --------------------------------------------------------------------------- #
+def _list_runs_postgres(settings: Settings) -> List[Dict[str, Any]]:
+    from sqlalchemy import select
+
+    from src.db import SpillRow, get_sessionmaker
+
+    with get_sessionmaker(settings)() as session:
+        rows = (
+            session.execute(select(SpillRow).order_by(SpillRow.last_updated.desc()))
+            .scalars()
+            .all()
+        )
+
+    # One summary per scene_id — a scene with more than one alerted spill
+    # keeps only its most-recently-updated one (rows already sorted above).
+    by_scene: Dict[str, Any] = {}
+    for row in rows:
+        by_scene.setdefault(row.scene_id, row)
+
+    return [
+        {
+            "scene_id": row.scene_id,
+            "acquisition_timestamp": (
+                row.acquisition_timestamp.isoformat() if row.acquisition_timestamp else None
+            ),
+            "area_km2": round(row.area_km2, 4),
+            "confidence": round(row.confidence, 4),
+            "alert_status": row.status,  # already the mapped word — see registry.py's writer
+        }
+        for row in by_scene.values()
+    ]
 
 
-def _map_alert_status(backend_status: Optional[str]) -> str:
-    """Backend raw status word -> frontend contract status word."""
-    return _STATUS_MAP.get(backend_status, "none")
+def _get_run_postgres(scene_id: str, settings: Settings) -> Optional[Dict[str, Any]]:
+    from geoalchemy2.shape import to_shape
+    from shapely.geometry import mapping as shapely_mapping
+    from sqlalchemy import select
+
+    from src.db import SpillRow, get_sessionmaker
+
+    with get_sessionmaker(settings)() as session:
+        row = (
+            session.execute(
+                select(SpillRow)
+                .where(SpillRow.scene_id == scene_id)
+                .order_by(SpillRow.last_updated.desc())
+            )
+            .scalars()
+            .first()
+        )
+
+    if row is None:
+        return None
+
+    centroid = to_shape(row.centroid)
+    polygon = to_shape(row.polygon)
+
+    return {
+        "spill": {
+            "scene_id": row.scene_id,
+            "acquisition_timestamp": (
+                row.acquisition_timestamp.isoformat() if row.acquisition_timestamp else ""
+            ),
+            "confidence": row.confidence,
+            "area_km2": row.area_km2,
+            "centroid": {"lat": centroid.y, "lon": centroid.x},
+            "bbox": row.bbox,
+            "polygon": shapely_mapping(polygon),
+            "major_axis_bearing": row.major_axis_bearing or 0.0,
+            "elongation": row.elongation or 1.0,
+        },
+        "alert": {
+            "spill_id": row.spill_id,
+            "status": row.status,
+            "rules_fired": row.rules_fired or [],
+            "first_seen": row.first_seen.isoformat() if row.first_seen else "",
+            "last_updated": row.last_updated.isoformat() if row.last_updated else "",
+        },
+        # Not columns on this table — see the module docstring.
+        "vessels": [],
+        "drift": {"forecast": [], "hindcast": []},
+    }
+
+
+#: Shared with src/alerts/registry.py's Postgres writer — see
+#: src/db.py::map_alert_status for why this must be the *only* copy.
+_map_alert_status = map_alert_status
 
 
 def _select_target_spill(spills: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -176,6 +265,9 @@ def get_run(
 ) -> Optional[Dict[str, Any]]:
     """Return the full PipelineRun contract for one scene, or None."""
     settings = settings or get_settings()
+
+    if database_url(settings):
+        return _get_run_postgres(scene_id, settings)
 
     # Try pipeline_result.json first
     pipeline_path = _find_pipeline_results(settings).get(scene_id)

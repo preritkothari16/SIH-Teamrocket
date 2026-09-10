@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
@@ -38,6 +39,18 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_PATH = REPO_ROOT / "configs" / "config.yaml"
 ENV_PREFIX = "SAROIL_"
 CONFIG_FILE_ENV = ENV_PREFIX + "CONFIG_FILE"
+
+# `.env` holds raw secrets (CDSE_CLIENT_ID, DATABASE_URL, ...) that are
+# deliberately NOT declared as Settings fields (see CredentialsConfig) — only
+# their *names* are. Loading it via python-dotenv straight into the real
+# process environment lets pydantic-settings' own env-var source (which
+# correctly ignores anything not matching SAROIL_) pick up the SAROIL_ keys,
+# while CredentialsConfig.resolve()'s plain os.environ.get() picks up the
+# rest. Do NOT also pass `env_file=` to SettingsConfigDict below —
+# pydantic-settings' own dotenv source parses unprefixed keys as candidate
+# top-level fields instead of silently ignoring them like the env-var source
+# does, so it crashes with `extra_forbidden` on every raw secret in the file.
+load_dotenv(REPO_ROOT / ".env")
 
 
 # --------------------------------------------------------------------------- #
@@ -100,6 +113,7 @@ class CredentialsConfig(BaseModel):
     cds_api_key_env: str = "CDS_API_KEY"
     cmems_username_env: str = "CMEMS_USERNAME"
     cmems_password_env: str = "CMEMS_PASSWORD"
+    database_url_env: str = "DATABASE_URL"
 
     def resolve(self, required: bool = False) -> Dict[str, Optional[str]]:
         """Read the actual secrets out of the environment.
@@ -487,6 +501,20 @@ class APIConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = Field(default=8000, gt=0, lt=65536)
 
+    # Extra allowed CORS origins on top of the hardcoded local Vite dev
+    # server list in src/api/main.py — a deployed frontend's origin (e.g.
+    # a Vercel URL) belongs here, set via SAROIL_API__CORS_ORIGINS (a plain
+    # comma-separated string — a real env var UI won't take a JSON list
+    # comfortably), not a code change + redeploy every time that URL
+    # changes. Deliberately a plain str field, not List[str]: pydantic-
+    # settings tries to JSON-decode env values for list-typed fields before
+    # any validator sees them, which rejects "a,b" outright.
+    cors_origins: str = ""
+
+    @property
+    def extra_cors_origins(self) -> List[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
 
 # --------------------------------------------------------------------------- #
 # Root settings
@@ -497,8 +525,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix=ENV_PREFIX,
         env_nested_delimiter="__",
-        env_file=REPO_ROOT / ".env",
-        env_file_encoding="utf-8",
         extra="forbid",
     )
 
@@ -529,12 +555,14 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> Tuple[PydanticBaseSettingsSource, ...]:
-        # Precedence, highest first: init args > env vars > .env > config.yaml.
+        # Precedence, highest first: init args > env vars (.env already loaded
+        # into the real environment by load_dotenv() above) > config.yaml.
+        # `dotenv_settings` is deliberately excluded — see the load_dotenv()
+        # comment above for why passing it here would crash on raw secrets.
         yaml_path = Path(os.environ.get(CONFIG_FILE_ENV, DEFAULT_CONFIG_PATH))
         return (
             init_settings,
             env_settings,
-            dotenv_settings,
             YamlSettingsSource(settings_cls, yaml_path),
         )
 

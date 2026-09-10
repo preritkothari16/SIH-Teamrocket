@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: sar-oilspill-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      # Set manually in the Render dashboard (Environment tab) — never
+      # committed here. Use the Session Pooler connection string from
+      # Supabase (Project Settings -> Database -> Connection pooling), not
+      # the direct db.<ref>.supabase.co one, unless Render's outbound
+      # networking has IPv6 (the direct hostname is IPv6-only — see
+      # deploy notes).
+      - key: DATABASE_URL
+        sync: false
+    healthCheckPath: /api/health
