@@ -8,6 +8,11 @@ venv/
 
 # --- secrets ---
 .env
+.env.local
+.env.*.local
+
+# --- vercel ---
+.vercel/
 
 # --- data + model weights (keep dir structure only) ---
 data/raw/*
@@ -38,3 +43,7 @@ models/*
 .DS_Store
 .idea/
 .vscode/
+
+# --- generated rasters (mask files, tile outputs) ---
+*.tif
+*.tiff
