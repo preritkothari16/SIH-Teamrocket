@@ -38,14 +38,14 @@
           </div>
         </div>
         <div class="flex items-center gap-2 pointer-events-auto">
-          <button id="run-list-toggle" class="hidden text-xs px-3 py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200">
+<button id="run-list-toggle" class="hidden text-xs px-3 py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
-          <button id="report-btn" hidden class="text-xs px-3 py-1.5 rounded-lg bg-blue-600/90 backdrop-blur border border-blue-500/50 text-white hover:bg-blue-500 transition-all duration-200 font-medium shadow-lg shadow-blue-900/30" title="Open the incident report for the selected spill">
-            <span class="flex items-center gap-1.5">
-              <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-              Report
-            </span>
+          <button id="theme-toggle" class="text-xs px-3 py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" aria-label="Toggle dark/light theme" title="Toggle dark/light theme">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="M2 6l4 4 7-7-3-3"/></svg>
+          </button>
+          <button id="reduce-motion-toggle" class="text-xs px-3 py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" aria-label="Toggle reduce motion" title="Toggle reduce motion">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4l10 8-10 8l1-2h-2l-10-8 10-8l1 2h2l-10 8-1-2h2L12 2z"/><path d="M12 22l-4-4 1.415-1.415L12 18l6-6-1.415-1.415L12 14l-6 6z"/></svg>
           </button>
           <button id="refresh-btn" class="text-xs px-3 py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" title="Refresh from backend">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg>
@@ -65,15 +65,15 @@
           </div>
           <div id="spill-stats" class="mt-3 grid grid-cols-3 gap-2">
             <div class="text-center p-2 rounded-lg bg-zinc-800/50">
-              <div id="stat-total" class="text-lg font-bold text-zinc-100">0</div>
+              <div id="stat-total" class="text-lg font-bold text-zinc-100 font-mono">0</div>
               <div class="text-[10px] text-zinc-500 uppercase">Total</div>
             </div>
             <div class="text-center p-2 rounded-lg bg-red-900/20 border border-red-900/30">
-              <div id="stat-alerted" class="text-lg font-bold text-red-400">0</div>
+              <div id="stat-alerted" class="text-lg font-bold text-red-400 font-mono">0</div>
               <div class="text-[10px] text-red-500/70 uppercase">Alerted</div>
             </div>
             <div class="text-center p-2 rounded-lg bg-emerald-900/20 border border-emerald-900/30">
-              <div id="stat-area" class="text-lg font-bold text-emerald-400">0</div>
+              <div id="stat-area" class="text-lg font-bold text-emerald-400 font-mono">0</div>
               <div class="text-[10px] text-emerald-500/70 uppercase">km&sup2;</div>
             </div>
           </div>
@@ -101,10 +101,10 @@
       <!-- Globe legend: top-right, clear of RunList -->
       <div id="globe-legend" class="absolute top-16 right-4 z-20 bg-zinc-900/95 backdrop-blur-xl border border-zinc-700/50 rounded-xl p-3 text-xs space-y-1.5 shadow-2xl shadow-black/30">
         <div class="font-bold text-zinc-300 mb-2 uppercase tracking-wider text-[10px]">Alert Status</div>
-        <div class="flex items-center gap-2.5"><div class="w-3 h-3 rounded-full shadow-lg shadow-red-500/30" style="background:rgb(255,77,77)"></div><span class="text-zinc-300 font-medium">New Spill</span></div>
-        <div class="flex items-center gap-2.5"><div class="w-3 h-3 rounded-full shadow-lg shadow-orange-500/30" style="background:rgb(255,140,38)"></div><span class="text-zinc-300 font-medium">Update</span></div>
-        <div class="flex items-center gap-2.5"><div class="w-3 h-3 rounded-full shadow-lg shadow-yellow-500/30" style="background:rgb(242,217,51)"></div><span class="text-zinc-300 font-medium">Possible</span></div>
-        <div class="flex items-center gap-2.5"><div class="w-3 h-3 rounded-full" style="background:rgb(102,102,102)"></div><span class="text-zinc-500 font-medium">No Alert</span></div>
+        <div class="flex items-center gap-2.5"><div class="w-3 h-3 rounded-full border border-red-400/70 relative glow-pulse"><div class="absolute inset-[3px] rounded-full bg-red-400"></div></div><span class="text-zinc-300 font-medium">New Spill</span></div>
+        <div class="flex items-center gap-2.5"><div class="w-3 h-3 rounded-full border border-orange-400/70 relative"><div class="absolute inset-[3px] rounded-full bg-orange-400"></div></div><span class="text-zinc-300 font-medium">Update</span></div>
+        <div class="flex items-center gap-2.5"><div class="w-3 h-3 rounded-full border border-yellow-400/70 relative"><div class="absolute inset-[3px] rounded-full bg-yellow-400"></div></div><span class="text-zinc-300 font-medium">Possible</span></div>
+        <div class="flex items-center gap-2.5"><div class="w-3 h-3 rounded-full border border-zinc-500/70 relative"><div class="absolute inset-[3px] rounded-full bg-zinc-500"></div></div><span class="text-zinc-500 font-medium">No Alert</span></div>
         <div class="pt-1.5 mt-1.5 border-t border-zinc-800/50">
           <div class="font-bold text-zinc-300 mb-1.5 uppercase tracking-wider text-[10px]">Marker Size</div>
           <div class="flex items-center gap-2 text-zinc-500">
@@ -115,9 +115,27 @@
       </div>
 
       <!-- Empty-state hint -->
-      <div id="globe-hint" class="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 text-zinc-500 text-xs pointer-events-none transition-opacity duration-300 flex items-center gap-2">
+      <div id="globe-hint" class="absolute bottom-12 left-1/2 -translate-x-1/2 z-10 text-zinc-500 text-xs pointer-events-none transition-opacity duration-300 flex items-center gap-2">
         <svg class="w-4 h-4 animate-bounce" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5"/></svg>
         Select a spill to view details
+      </div>
+
+      <!-- Fixed stats strip (bottom, always visible) — HUD style -->
+      <div id="stats-strip" class="absolute bottom-0 left-0 right-0 z-30 h-10 flex items-center justify-center gap-8 bg-zinc-950/85 backdrop-blur-md border-t border-zinc-700/30 pointer-events-none">
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-zinc-500 uppercase tracking-widest font-semibold">Spills</span>
+          <span id="strip-total" class="font-mono font-bold text-zinc-100 text-sm">0</span>
+          <div class="w-8 h-px bg-gradient-to-r from-zinc-500/60 to-transparent"></div>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-zinc-500 uppercase tracking-widest font-semibold">Active</span>
+          <span id="strip-active" class="font-mono font-bold text-red-400 text-sm">0</span>
+          <div class="w-8 h-px bg-gradient-to-r from-red-500/40 to-transparent"></div>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-zinc-500 uppercase tracking-widest font-semibold">Vessels</span>
+          <span id="strip-vessels" class="font-mono font-bold text-blue-400 text-sm">0</span>
+        </div>
       </div>
 
       <!-- Loading state: centered spinner -->
@@ -160,6 +178,41 @@
       </div>
     </div>
 
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module">
+(function () {
+  // Theme toggle: dark / light / system via localStorage
+  const html = document.documentElement;
+  const savedTheme = localStorage.getItem('data-theme');
+  let currentTheme = savedTheme || 'dark';
+  html.dataset.theme = currentTheme;
+
+  const themeToggle = document.getElementById('theme-toggle');
+  themeToggle.addEventListener('click', () => {
+    if (currentTheme === 'dark') currentTheme = 'light';
+    else if (currentTheme === 'light') currentTheme = 'system';
+    else currentTheme = 'dark';
+    html.dataset.theme = currentTheme;
+    localStorage.setItem('data-theme', currentTheme);
+  });
+
+  // Reduce motion toggle: overrides auto preference, respects reduced-motion media query
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const savedReduced = localStorage.getItem('data-reduced-motion');
+  let currentReduced = savedReduced !== null ? savedReduced === 'true' : prefersReduced;
+  const htmlBody = document.body;
+  const reduceMotionToggle = document.getElementById('reduce-motion-toggle');
+
+  htmlBody.dataset.reducedMotion = currentReduced;
+  reduceMotionToggle.setAttribute('aria-pressed', String(currentReduced));
+
+  reduceMotionToggle.addEventListener('click', () => {
+    currentReduced = !currentReduced;
+    htmlBody.dataset.reducedMotion = currentReduced;
+    localStorage.setItem('data-reduced-motion', String(currentReduced));
+    reduceMotionToggle.setAttribute('aria-pressed', String(currentReduced));
+  });
+})();
+</script>
+<script type="module" src="/src/main.ts"></script>
   </body>
 </html>

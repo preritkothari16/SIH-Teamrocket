@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Incident report - demo_pipeline</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+:root {
+  --bg: #0f0f13;
+  --surface: #1a1a22;
+  --surface-alt: #222230;
+  --border: #2a2a38;
+  --text: #e4e4ec;
+  --text-muted: #8888a0;
+  --accent-red: #ef4444;
+  --accent-orange: #f97316;
+  --accent-yellow: #eab308;
+  --accent-green: #22c55e;
+  --accent-blue: #3b82f6;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  margin: 0; padding: 0;
+  background: var(--bg); color: var(--text);
+  line-height: 1.6;
+}
+.page { max-width: 960px; margin: 0 auto; padding: 2.5rem 2rem; }
+
+/* Header */
+.header { border-bottom: 2px solid var(--border); padding-bottom: 1.5rem; margin-bottom: 2rem; }
+.header h1 { font-size: 1.6rem; font-weight: 800; margin: 0 0 0.4rem 0; letter-spacing: -0.02em; }
+.header h1 span { color: var(--accent-yellow); }
+.header .meta { color: var(--text-muted); font-size: 0.85rem; }
+.header .meta b { color: var(--text); }
+
+/* Stats row */
+.stats { display: flex; gap: 1rem; margin: 1.2rem 0 0 0; }
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 0.8rem 1.2rem; flex: 1; text-align: center;
+}
+.stat-card .value { font-size: 1.5rem; font-weight: 700; }
+.stat-card .label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-top: 0.15rem; }
+.stat-red .value { color: var(--accent-red); }
+.stat-green .value { color: var(--accent-green); }
+.stat-blue .value { color: var(--accent-blue); }
+
+/* Map */
+.map-section { margin: 2rem 0; }
+.map-section h2 { font-size: 1rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin: 0 0 0.8rem 0; }
+
+/* Spill section */
+.spill-section {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 1.5rem; margin: 1.5rem 0;
+}
+.spill-section h2 {
+  font-size: 1.1rem; font-weight: 700; margin: 0 0 1rem 0;
+  padding-bottom: 0.6rem; border-bottom: 1px solid var(--border);
+}
+.spill-section h3 {
+  font-size: 0.85rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted); margin: 1.2rem 0 0.5rem 0;
+}
+
+/* Summary table */
+.summary-table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+.summary-table th {
+  text-align: left; font-size: 0.78rem; color: var(--text-muted); font-weight: 500;
+  padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); width: 40%;
+}
+.summary-table td {
+  padding: 0.4rem 0.6rem; font-size: 0.88rem; border-bottom: 1px solid var(--border);
+}
+
+/* Status badges */
+.badge {
+  display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.55rem;
+  border-radius: 6px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.badge-active { background: rgba(239,68,68,0.15); color: var(--accent-red); border: 1px solid rgba(239,68,68,0.3); }
+.badge-possible { background: rgba(234,179,8,0.15); color: var(--accent-yellow); border: 1px solid rgba(234,179,8,0.3); }
+.badge-rejected { background: rgba(136,136,160,0.1); color: var(--text-muted); border: 1px solid rgba(136,136,160,0.2); }
+
+/* Rules list */
+.rules-list { list-style: none; padding: 0; margin: 0.5rem 0; }
+.rules-list li {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.4rem 0.6rem; border-radius: 6px; margin-bottom: 0.3rem; font-size: 0.85rem;
+}
+.rule-pass { background: rgba(34,197,94,0.08); color: var(--accent-green); }
+.rule-fail { background: rgba(239,68,68,0.08); color: var(--accent-red); }
+.rule-icon { font-size: 0.9rem; width: 1.2rem; text-align: center; flex-shrink: 0; }
+.rule-name { font-weight: 600; }
+.rule-reason { color: var(--text-muted); font-size: 0.8rem; margin-left: auto; }
+
+/* Vessel table */
+.vessel-table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+.vessel-table th {
+  text-align: left; font-size: 0.72rem; color: var(--text-muted); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 0.5rem 0.6rem; border-bottom: 2px solid var(--border);
+}
+.vessel-table td {
+  padding: 0.5rem 0.6rem; font-size: 0.85rem; border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.vessel-table tr:hover { background: var(--surface-alt); }
+
+.rank-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5rem; height: 1.5rem; border-radius: 50%; font-size: 0.7rem; font-weight: 700;
+}
+.rank-1 { background: rgba(234,179,8,0.2); color: var(--accent-yellow); border: 1px solid rgba(234,179,8,0.3); }
+.rank-2 { background: rgba(136,136,160,0.15); color: var(--text); border: 1px solid rgba(136,136,160,0.2); }
+.rank-3 { background: rgba(249,115,22,0.15); color: var(--accent-orange); border: 1px solid rgba(249,115,22,0.2); }
+.rank-n { background: var(--surface-alt); color: var(--text-muted); border: 1px solid var(--border); }
+
+.score-bar {
+  display: inline-block; height: 0.35rem; border-radius: 2px; min-width: 1.5rem;
+}
+.score-high { background: var(--accent-green); }
+.score-med { background: var(--accent-yellow); }
+.score-low { background: var(--accent-red); }
+.score-text { font-size: 0.8rem; font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 0.3rem; }
+
+/* Drift table */
+.drift-table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+.drift-table th {
+  text-align: left; font-size: 0.78rem; color: var(--text-muted); font-weight: 500;
+  padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
+}
+.drift-table td {
+  padding: 0.4rem 0.6rem; font-size: 0.85rem; border-bottom: 1px solid var(--border);
+}
+.drift-horizon {
+  display: inline-block; background: rgba(249,115,22,0.12); color: var(--accent-orange);
+  font-size: 0.75rem; font-weight: 700; padding: 0.1rem 0.45rem; border-radius: 4px;
+}
+
+/* Footer */
+.footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.75rem; text-align: center; }
+
+.no-data { color: var(--text-muted); font-style: italic; font-size: 0.85rem; padding: 0.5rem 0; }
+
+.mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+.meta-field { font-size: 0.85rem; color: var(--text-muted); margin: 0.1rem 0; }
+.meta-field b { color: var(--text); }
+.map-frame {
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  margin: 0.8rem 0;
+}
+.map-frame iframe { width: 100%; height: 480px; border: none; }
+
+@media print {
+  * { transition: none !important; }
+  body { background: white; color: #111; }
+  .page { max-width: 100%; padding: 1rem; }
+  .spill-section { break-inside: avoid; }
+  .header { border-bottom-color: #ccc; }
+  .header h1 span { color: #b45309; }
+  .stat-card { border-color: #ddd; background: #f9f9f9; }
+  .stat-card .label { color: #666; }
+  .badge { border: 1px solid currentColor; }
+  .map-frame { border-color: #ccc; }
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <h1>SAR<span>Oil</span>Spill &mdash; Incident Report</h1>
+    <p class="meta">
+      <span class="meta-field">Scene <b>demo_pipeline</b></span> &middot; <span class="meta-field">Generated 2024-04-10T14:30:00+00:00</span>
+    </p>
+    <div class="stats">
+      <div class="stat-card stat-red">
+        <div class="value">1</div>
+        <div class="label">Spills Detected</div>
+      </div>
+      <div class="stat-card stat-green">
+        <div class="value">1</div>
+        <div class="label">Alerted</div>
+      </div>
+      <div class="stat-card stat-blue">
+        <div class="value">8.30</div>
+        <div class="label">Total Area (km&sup2;)</div>
+      </div>
+    </div>
+  </div>
+  <div class="map-section">
+    <h2>Map Overview</h2>
+    <div class="map-frame">
+      <div style="width:100%;"><div style="position:relative;width:100%;height:0;padding-bottom:60%;"><span style="color:#565656">Make this Notebook Trusted to load map: File -> Trust Notebook</span><iframe srcdoc="&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+    
+    &lt;meta http-equiv=&quot;content-type&quot; content=&quot;text/html; charset=UTF-8&quot; /&gt;
+    &lt;script src=&quot;https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js&quot;&gt;&lt;/script&gt;
+    &lt;script src=&quot;https://code.jquery.com/jquery-3.7.1.min.js&quot;&gt;&lt;/script&gt;
+    &lt;script src=&quot;https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js&quot;&gt;&lt;/script&gt;
+    &lt;script src=&quot;https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js&quot;&gt;&lt;/script&gt;
+    &lt;link rel=&quot;stylesheet&quot; href=&quot;https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css&quot;/&gt;
+    &lt;link rel=&quot;stylesheet&quot; href=&quot;https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css&quot;/&gt;
+    &lt;link rel=&quot;stylesheet&quot; href=&quot;https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap-glyphicons.css&quot;/&gt;
+    &lt;link rel=&quot;stylesheet&quot; href=&quot;https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css&quot;/&gt;
+    &lt;link rel=&quot;stylesheet&quot; href=&quot;https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css&quot;/&gt;
+    &lt;link rel=&quot;stylesheet&quot; href=&quot;https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css&quot;/&gt;
+    
+            &lt;meta name=&quot;viewport&quot; content=&quot;width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no&quot; /&gt;
+            &lt;style&gt;
+                #map_c466d21fc132e3466f248f6207831678 {
+                    position: relative;
+                    width: 100.0%;
+                    height: 100.0%;
+                    left: 0.0%;
+                    top: 0.0%;
+                }
+                .leaflet-container { font-size: 1rem; }
+            &lt;/style&gt;
+
+            &lt;style&gt;html, body {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            &lt;/style&gt;
+
+            &lt;style&gt;#map {
+                position:absolute;
+                top:0;
+                bottom:0;
+                right:0;
+                left:0;
+                }
+            &lt;/style&gt;
+
+            &lt;script&gt;
+                L_NO_TOUCH = false;
+                L_DISABLE_3D = false;
+            &lt;/script&gt;
+
+        
+&lt;/head&gt;
+&lt;body&gt;
+    
+    
+            &lt;div class=&quot;folium-map&quot; id=&quot;map_c466d21fc132e3466f248f6207831678&quot; &gt;&lt;/div&gt;
+        
+&lt;/body&gt;
+&lt;script&gt;
+    
+    
+            var map_c466d21fc132e3466f248f6207831678 = L.map(
+                &quot;map_c466d21fc132e3466f248f6207831678&quot;,
+                {
+                    center: [23.866120218579237, -89.75245901639343],
+                    crs: L.CRS.EPSG3857,
+                    ...{
+  &quot;zoom&quot;: 9,
+  &quot;zoomControl&quot;: true,
+  &quot;preferCanvas&quot;: false,
+}
+
+                }
+            );
+
+            
+
+        
+    
+            var tile_layer_48ae5fdd37f917de2daece2290e963d5 = L.tileLayer(
+                &quot;https://tile.openstreetmap.org/{z}/{x}/{y}.png&quot;,
+                {
+  &quot;minZoom&quot;: 0,
+  &quot;maxZoom&quot;: 19,
+  &quot;maxNativeZoom&quot;: 19,
+  &quot;noWrap&quot;: false,
+  &quot;attribution&quot;: &quot;\u0026copy; \u003ca href=\&quot;https://www.openstreetmap.org/copyright\&quot;\u003eOpenStreetMap\u003c/a\u003e contributors&quot;,
+  &quot;subdomains&quot;: &quot;abc&quot;,
+  &quot;detectRetina&quot;: false,
+  &quot;tms&quot;: false,
+  &quot;opacity&quot;: 1,
+}
+
+            );
+        
+    
+            tile_layer_48ae5fdd37f917de2daece2290e963d5.addTo(map_c466d21fc132e3466f248f6207831678);
+        
+    
+            var feature_group_5730a7c1594ca5b6c1a7d97cc5b882f6 = L.featureGroup(
+                {
+}
+            );
+        
+    
+        function geo_json_070016611ac4d2dfb2b64be73f58721e_styler(feature) {
+            switch(feature.id) {
+                default:
+                    return {&quot;color&quot;: &quot;black&quot;, &quot;fillOpacity&quot;: 0.25, &quot;weight&quot;: 2};
+            }
+        }
+
+        function geo_json_070016611ac4d2dfb2b64be73f58721e_onEachFeature(feature, layer) {
+
+            layer.on({
+            });
+        };
+        var geo_json_070016611ac4d2dfb2b64be73f58721e = L.geoJson(null, {
+                onEachFeature: geo_json_070016611ac4d2dfb2b64be73f58721e_onEachFeature,
+            
+                style: geo_json_070016611ac4d2dfb2b64be73f58721e_styler,
+            ...{
+}
+        });
+
+        function geo_json_070016611ac4d2dfb2b64be73f58721e_add (data) {
+            geo_json_070016611ac4d2dfb2b64be73f58721e
+                .addData(data);
+        }
+            geo_json_070016611ac4d2dfb2b64be73f58721e_add({&quot;features&quot;: [{&quot;geometry&quot;: {&quot;coordinates&quot;: [[[-90.2, 23.8], [-89.7, 24.2], [-89.3, 24.0], [-89.8, 23.5], [-90.2, 23.8]]], &quot;type&quot;: &quot;Polygon&quot;}, &quot;id&quot;: &quot;0&quot;, &quot;type&quot;: &quot;Feature&quot;}], &quot;type&quot;: &quot;FeatureCollection&quot;});
+
+        
+    
+            geo_json_070016611ac4d2dfb2b64be73f58721e.bindTooltip(
+                `&lt;div&gt;
+                     &lt;b&gt;evt_a1b2c3d4&lt;/b&gt;&lt;br&gt;status: active&lt;br&gt;area: 8.300 km²&lt;br&gt;candidates: 5 rule(s) evaluated
+                 &lt;/div&gt;`,
+                {
+  &quot;sticky&quot;: true,
+}
+            );
+        
+    
+            geo_json_070016611ac4d2dfb2b64be73f58721e.addTo(feature_group_5730a7c1594ca5b6c1a7d97cc5b882f6);
+        
+    
+            feature_group_5730a7c1594ca5b6c1a7d97cc5b882f6.addTo(map_c466d21fc132e3466f248f6207831678);
+        
+    
+            var feature_group_98043d941f9d330f841a540352f2fef7 = L.featureGroup(
+                {
+}
+            );
+        
+    
+            feature_group_98043d941f9d330f841a540352f2fef7.addTo(map_c466d21fc132e3466f248f6207831678);
+        
+    
+            var feature_group_4fadd6e479795a507c8769937048d5a4 = L.featureGroup(
+                {
+}
+            );
+        
+    
+            var feature_group_0fd65ea00a93aec3f198f44b2f5c7140 = L.featureGroup(
+                {
+}
+            );
+        
+    
+            var poly_line_5726f041cf5a7304e0f5d552a136f337 = L.polyline(
+                [[24.0, -89.9], [24.3, -89.7], [24.6, -89.5], [24.9, -89.3], [25.2, -89.1], [25.5, -88.9]],
+                {&quot;bubblingMouseEvents&quot;: true, &quot;color&quot;: &quot;red&quot;, &quot;dashArray&quot;: null, &quot;dashOffset&quot;: null, &quot;fill&quot;: false, &quot;fillColor&quot;: &quot;red&quot;, &quot;fillOpacity&quot;: 0.2, &quot;fillRule&quot;: &quot;evenodd&quot;, &quot;lineCap&quot;: &quot;round&quot;, &quot;lineJoin&quot;: &quot;round&quot;, &quot;noClip&quot;: false, &quot;opacity&quot;: 0.8, &quot;smoothFactor&quot;: 1.0, &quot;stroke&quot;: true, &quot;weight&quot;: 3}
+            ).addTo(feature_group_0fd65ea00a93aec3f198f44b2f5c7140);
+        
+    
+            var marker_2dcf280d41f306f336f0f8948251dca3 = L.marker(
+                [25.5, -88.9],
+                {
+}
+            ).addTo(feature_group_0fd65ea00a93aec3f198f44b2f5c7140);
+        
+    
+            var icon_38a495755ad7baf6f58038d28289533e = L.AwesomeMarkers.icon(
+                {
+  &quot;markerColor&quot;: &quot;red&quot;,
+  &quot;iconColor&quot;: &quot;white&quot;,
+  &quot;icon&quot;: &quot;info-sign&quot;,
+  &quot;prefix&quot;: &quot;glyphicon&quot;,
+  &quot;extraClasses&quot;: &quot;fa-rotate-0&quot;,
+}
+            );
+        
+    
+        var popup_83ec6b5e7abc4cb4c6536d1fec90f30f = L.popup({
+  &quot;maxWidth&quot;: 300,
+});
+
+        
+            
+                var html_652ee1a5372ef413516cc56519aae3d1 = $(`&lt;div id=&quot;html_652ee1a5372ef413516cc56519aae3d1&quot; style=&quot;width: 100.0%; height: 100.0%;&quot;&gt;&lt;b&gt;#1 - MMSI 367123450&lt;/b&gt; (TANKER Alpha)&lt;br&gt;score: 0.92&lt;br&gt;3.2 km CPA, 0.4h before image, track within 8 deg of slick axis, tanker&lt;/div&gt;`)[0];
+                popup_83ec6b5e7abc4cb4c6536d1fec90f30f.setContent(html_652ee1a5372ef413516cc56519aae3d1);
+            
+        
+
+        marker_2dcf280d41f306f336f0f8948251dca3.bindPopup(popup_83ec6b5e7abc4cb4c6536d1fec90f30f)
+        ;
+
+        
+    
+    
+                marker_2dcf280d41f306f336f0f8948251dca3.setIcon(icon_38a495755ad7baf6f58038d28289533e);
+            
+    
+            var poly_line_a7414aa54cbe6b7871f372ccf869ff5d = L.polyline(
+                [[23.9, -89.8], [24.2, -89.6], [24.5, -89.4], [24.8, -89.2], [25.1, -89.0]],
+                {&quot;bubblingMouseEvents&quot;: true, &quot;color&quot;: &quot;blue&quot;, &quot;dashArray&quot;: null, &quot;dashOffset&quot;: null, &quot;fill&quot;: false, &quot;fillColor&quot;: &quot;blue&quot;, &quot;fillOpacity&quot;: 0.2, &quot;fillRule&quot;: &quot;evenodd&quot;, &quot;lineCap&quot;: &quot;round&quot;, &quot;lineJoin&quot;: &quot;round&quot;, &quot;noClip&quot;: false, &quot;opacity&quot;: 0.8, &quot;smoothFactor&quot;: 1.0, &quot;stroke&quot;: true, &quot;weight&quot;: 3}
+            ).addTo(feature_group_0fd65ea00a93aec3f198f44b2f5c7140);
+        
+    
+            var marker_9b62ec64d154847bb353d578255de1cd = L.marker(
+                [25.1, -89.0],
+                {
+}
+            ).addTo(feature_group_0fd65ea00a93aec3f198f44b2f5c7140);
+        
+    
+            var icon_379195e0cf231bda4a66e4391db4f88d = L.AwesomeMarkers.icon(
+                {
+  &quot;markerColor&quot;: &quot;blue&quot;,
+  &quot;iconColor&quot;: &quot;white&quot;,
+  &quot;icon&quot;: &quot;info-sign&quot;,
+  &quot;prefix&quot;: &quot;glyphicon&quot;,
+  &quot;extraClasses&quot;: &quot;fa-rotate-0&quot;,
+}
+            );
+        
+    
+        var popup_e6c24c3b4999ea3c89ad04c7743ba46a = L.popup({
+  &quot;maxWidth&quot;: 300,
+});
+
+        
+            
+                var html_b5b167d7b329ad8a304125b3ef804e90 = $(`&lt;div id=&quot;html_b5b167d7b329ad8a304125b3ef804e90&quot; style=&quot;width: 100.0%; height: 100.0%;&quot;&gt;&lt;b&gt;#2 - MMSI 367123451&lt;/b&gt; (TANKER Beta)&lt;br&gt;score: 0.67&lt;br&gt;8.7 km CPA, 0.8h before image, parallel trajectory, tanker&lt;/div&gt;`)[0];
+                popup_e6c24c3b4999ea3c89ad04c7743ba46a.setContent(html_b5b167d7b329ad8a304125b3ef804e90);
+            
+        
+
+        marker_9b62ec64d154847bb353d578255de1cd.bindPopup(popup_e6c24c3b4999ea3c89ad04c7743ba46a)
+        ;
+
+        
+    
+    
+                marker_9b62ec64d154847bb353d578255de1cd.setIcon(icon_379195e0cf231bda4a66e4391db4f88d);
+            
+    
+            feature_group_0fd65ea00a93aec3f198f44b2f5c7140.addTo(map_c466d21fc132e3466f248f6207831678);
+        
+    
+            var layer_control_d70f541a67a53a594bc3858c91d946b5_layers = {
+                base_layers : {
+                    &quot;openstreetmap&quot; : tile_layer_48ae5fdd37f917de2daece2290e963d5,
+                },
+                overlays :  {
+                    &quot;Detected slicks&quot; : feature_group_5730a7c1594ca5b6c1a7d97cc5b882f6,
+                    &quot;Drift forecast&quot; : feature_group_98043d941f9d330f841a540352f2fef7,
+                    &quot;Hindcast corridor&quot; : feature_group_4fadd6e479795a507c8769937048d5a4,
+                    &quot;Vessel tracks&quot; : feature_group_0fd65ea00a93aec3f198f44b2f5c7140,
+                },
+            };
+            let layer_control_d70f541a67a53a594bc3858c91d946b5 = L.control.layers(
+                layer_control_d70f541a67a53a594bc3858c91d946b5_layers.base_layers,
+                layer_control_d70f541a67a53a594bc3858c91d946b5_layers.overlays,
+                {
+  &quot;position&quot;: &quot;topright&quot;,
+  &quot;collapsed&quot;: false,
+  &quot;autoZIndex&quot;: true,
+}
+            ).addTo(map_c466d21fc132e3466f248f6207831678);
+
+        
+&lt;/script&gt;
+&lt;/html&gt;" style="position:absolute;width:100%;height:100%;left:0;top:0;border:none !important;" allowfullscreen webkitallowfullscreen mozallowfullscreen></iframe></div></div>
+    </div>
+  </div>
+  
+    <section class="spill-section">
+      <h2 style="border-left:3px solid var(--accent-red); padding-left:0.8rem;">
+        Spill 1: demo_pipeline_spill_001
+      </h2>
+      <table class="summary-table"><tr><th>Spill ID</th><td><span class="mono">demo_pipeline_spill_001</span></td></tr><tr><th>Scene ID</th><td>demo_pipeline</td></tr><tr><th>Acquisition time</th><td><span class="mono">2024-04-10T14:20:00+00:00</span></td></tr><tr><th>Location</th><td><span class="mono">-89.99990</span>, <span class="mono">24.11110</span></td></tr><tr><th>Area</th><td><span class="mono">8.300</span> km²</td></tr><tr><th>Mean confidence</th><td><span class="mono">0.850</span></td></tr><tr><th>Elongation</th><td><span class="mono">2.10</span></td></tr><tr><th>Estimated volume</th><td><span class="mono">8300.0</span> m³</td></tr><tr><th>Alert status</th><td><span class="badge badge-active">active</span></td></tr></table>
+      <h3>Alert rules</h3>
+      <ul class="rules-list"><li class="rule-pass"><span class="rule-icon">✓</span><span class="rule-name">confidence</span><span class="rule-reason">confidence 0.85 &gt;= 0.70</span></li><li class="rule-pass"><span class="rule-icon">✓</span><span class="rule-name">area</span><span class="rule-reason">area 8.300 km2 &gt;= 0.100 km2</span></li><li class="rule-pass"><span class="rule-icon">✓</span><span class="rule-name">wind</span><span class="rule-reason">wind 7.2 m/s within [2.0, 12.0] m/s</span></li><li class="rule-pass"><span class="rule-icon">✓</span><span class="rule-name">exclusion_zone</span><span class="rule-reason">outside all exclusion zones</span></li><li class="rule-pass"><span class="rule-icon">✓</span><span class="rule-name">dedup</span><span class="rule-reason">no matching recent event</span></li></ul>
+      <h3>Ranked candidate vessels</h3>
+      <table class="vessel-table"><tr><th style="width:3rem">Rank</th><th>MMSI</th><th>Name</th><th>Type</th><th style="width:140px">Score</th><th>CPA</th><th>Explanation</th></tr><tr><td><span class="rank-badge rank-1">1</span></td><td><span class="mono">367123450</span></td><td>TANKER Alpha</td><td>tanker</td><td><span class="score-bar score-high" style="width:92%"></span><span class="score-text" style="color:var(--accent-green)"><span class="mono">0.920</span></span></td><td><span class="mono">3.20</span> km</td><td style="font-size:0.82rem;color:var(--text-muted)">3.2 km CPA, 0.4h before image, track within 8 deg of slick axis, tanker</td></tr><tr><td><span class="rank-badge rank-2">2</span></td><td><span class="mono">367123451</span></td><td>TANKER Beta</td><td>tanker</td><td><span class="score-bar score-med" style="width:67%"></span><span class="score-text" style="color:var(--accent-yellow)"><span class="mono">0.670</span></span></td><td><span class="mono">8.70</span> km</td><td style="font-size:0.82rem;color:var(--text-muted)">8.7 km CPA, 0.8h before image, parallel trajectory, tanker</td></tr></table>
+      <h3>Drift forecast</h3>
+      <p class="no-data">No drift forecast available for this spill.</p>
+    </section>
+    
+  <div class="footer">
+    SAR Oil Spill Detection &amp; Attribution System &middot; Smart India Hackathon
+  </div>
+</div>
+</body>
+</html>
+<script>
+(function() {
+  var iframes = document.querySelectorAll('iframe');
+  for (var i = 0; i < iframes.length; i++) {
+    var iframe = iframes[i];
+    iframe.onload = function() {
+      try {
+        var doc = iframe.contentDocument || iframe.contentWindow.document;
+        var s = doc.createElement('style');
+        s.textContent = 'body{background:#0f0f13!important;margin:0;}' +
+          '.leaflet-control{background:#1a1a22!important;color:#e4e4ec!important;border-color:#2a2a38!important;}' +
+          '.leaflet-control-layers label{color:#e4e4ec!important;}' +
+          '.leaflet-control-layers-toggle{background-color:#1a1a22!important;border-color:#2a2a38!important;}' +
+          '.leaflet-control-zoom a{background:#1a1a22!important;color:#e4e4ec!important;border-color:#2a2a38!important;}' +
+          '.leaflet-control-attribution{background:rgba(15,15,19,0.8)!important;color:#8888a0!important;}' +
+          '.leaflet-control-attribution a{color:#3b82f6!important;}';
+        doc.head.appendChild(s);
+      } catch(e) {}
+    };
+  }
+})();
+</script>

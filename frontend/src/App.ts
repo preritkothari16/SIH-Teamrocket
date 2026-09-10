@@ -93,6 +93,7 @@ export class App {
     this.setState('ready');
     this.globe.init(this.allRuns);
     this.runList.render(this.allRuns);
+    this.updateStatsStrip();
   }
 
   private async loadFixtures(): Promise<void> {
@@ -124,7 +125,7 @@ export class App {
     }
 
     const run = this.allRuns.find(
-      (r) => (r.alert?.spill_id ?? r.spill.scene_id) === runId,
+      (r) => (r.alert?.spill_id || r.spill.scene_id) === runId,
     );
     if (!run) return;
 
@@ -167,7 +168,17 @@ export class App {
       this.setState('ready');
       this.globe.init(this.allRuns);
       this.runList.render(this.allRuns);
+      this.updateStatsStrip();
     });
+  }
+
+  private updateStatsStrip(): void {
+    const stripTotal = document.getElementById('strip-total');
+    const stripActive = document.getElementById('strip-active');
+    const stripVessels = document.getElementById('strip-vessels');
+    if (stripTotal) stripTotal.textContent = String(this.allRuns.length);
+    if (stripActive) stripActive.textContent = String(this.allRuns.filter(r => r.alert?.status && r.alert.status !== 'none').length);
+    if (stripVessels) stripVessels.textContent = String(this.allRuns.reduce((s, r) => s + r.vessels.length, 0));
   }
 
   private setupReportButton(): void {

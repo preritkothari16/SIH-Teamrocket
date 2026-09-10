@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from src.output.map import build_map
 
 STYLE = """
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
 :root {
   --bg: #0f0f13;
   --surface: #1a1a22;
@@ -161,6 +162,28 @@ body {
 .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.75rem; text-align: center; }
 
 .no-data { color: var(--text-muted); font-style: italic; font-size: 0.85rem; padding: 0.5rem 0; }
+
+.mono { font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; }
+.meta-field { font-size: 0.85rem; color: var(--text-muted); margin: 0.1rem 0; }
+.meta-field b { color: var(--text); }
+.map-frame {
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+  margin: 0.8rem 0;
+}
+.map-frame iframe { width: 100%; height: 480px; border: none; }
+
+@media print {
+  * { transition: none !important; }
+  body { background: white; color: #111; }
+  .page { max-width: 100%; padding: 1rem; }
+  .spill-section { break-inside: avoid; }
+  .header { border-bottom-color: #ccc; }
+  .header h1 span { color: #b45309; }
+  .stat-card { border-color: #ddd; background: #f9f9f9; }
+  .stat-card .label { color: #666; }
+  .badge { border: 1px solid currentColor; }
+  .map-frame { border-color: #ccc; }
+}
 """
 
 
@@ -169,7 +192,9 @@ class ReportBuildError(RuntimeError):
 
 
 def _fmt(value: Optional[float], digits: int = 3, suffix: str = "") -> str:
-    return "unknown" if value is None else f"{value:.{digits}f}{suffix}"
+    if value is None:
+        return '<span class="mono">unknown</span>'
+    return f'<span class="mono">{value:.{digits}f}</span>{suffix}'
 
 
 def _status_badge(status: Optional[str]) -> str:
@@ -187,9 +212,9 @@ def _status_badge(status: Optional[str]) -> str:
 def _spill_summary_table(spill: Dict[str, Any], alert: Dict[str, Any]) -> str:
     props = spill.get("properties") or {}
     rows = [
-        ("Spill ID", props.get("spill_id", "unknown")),
+        ("Spill ID", f'<span class="mono">{html_lib.escape(str(props.get("spill_id", "unknown")))}</span>'),
         ("Scene ID", props.get("scene_id", "unknown")),
-        ("Acquisition time", props.get("acquisition_timestamp") or "unknown"),
+        ("Acquisition time", f'<span class="mono">{html_lib.escape(str(props.get("acquisition_timestamp") or "unknown"))}</span>'),
         ("Location", f"{_fmt(props.get('centroid_lon'), 5)}, {_fmt(props.get('centroid_lat'), 5)}"),
         ("Area", _fmt(props.get("area_km2"), 3, " km\u00b2")),
         ("Mean confidence", _fmt(props.get("mean_confidence"), 3)),
@@ -253,7 +278,7 @@ def _vessel_table(vessels: List[Dict[str, Any]]) -> str:
         rows.append(
             "<tr>"
             f'<td><span class="rank-badge {rank_cls}">{rank_num}</span></td>'
-            f"<td>{html_lib.escape(str(v.get('mmsi', 'unknown')))}</td>"
+            f"<td><span class=\"mono\">{html_lib.escape(str(v.get('mmsi', 'unknown')))}</span></td>"
             f"<td>{html_lib.escape(str(v.get('vessel_name') or 'unknown'))}</td>"
             f"<td>{html_lib.escape(str(v.get('vessel_type') or 'unknown'))}</td>"
             f'<td>'
@@ -350,7 +375,7 @@ def build_report_html(result: Dict[str, Any]) -> str:
   <div class="header">
     <h1>SAR<span>Oil</span>Spill &mdash; Incident Report</h1>
     <p class="meta">
-      Scene <b>{scene_id}</b> &middot; Generated {generated_at}
+      <span class="meta-field">Scene <b>{scene_id}</b></span> &middot; <span class="meta-field">Generated {generated_at}</span>
     </p>
     <div class="stats">
       <div class="stat-card stat-red">
@@ -369,7 +394,9 @@ def build_report_html(result: Dict[str, Any]) -> str:
   </div>
   <div class="map-section">
     <h2>Map Overview</h2>
-    {map_embed}
+    <div class="map-frame">
+      {map_embed}
+    </div>
   </div>
   {sections}
   <div class="footer">
@@ -378,7 +405,7 @@ def build_report_html(result: Dict[str, Any]) -> str:
 </div>
 </body>
 </html>
-"""
+""" + _MAP_DARK_INJECT
 
 
 def save_report(result: Dict[str, Any], output_path: Path) -> Path:
@@ -390,3 +417,26 @@ def save_report(result: Dict[str, Any], output_path: Path) -> Path:
 
 
 __all__ = ["ReportBuildError", "build_report_html", "save_report"]
+
+_MAP_DARK_INJECT = """<script>
+(function() {
+  var iframes = document.querySelectorAll('iframe');
+  for (var i = 0; i < iframes.length; i++) {
+    var iframe = iframes[i];
+    iframe.onload = function() {
+      try {
+        var doc = iframe.contentDocument || iframe.contentWindow.document;
+        var s = doc.createElement('style');
+        s.textContent = 'body{background:#0f0f13!important;margin:0;}' +
+          '.leaflet-control{background:#1a1a22!important;color:#e4e4ec!important;border-color:#2a2a38!important;}' +
+          '.leaflet-control-layers label{color:#e4e4ec!important;}' +
+          '.leaflet-control-layers-toggle{background-color:#1a1a22!important;border-color:#2a2a38!important;}' +
+          '.leaflet-control-zoom a{background:#1a1a22!important;color:#e4e4ec!important;border-color:#2a2a38!important;}' +
+          '.leaflet-control-attribution{background:rgba(15,15,19,0.8)!important;color:#8888a0!important;}' +
+          '.leaflet-control-attribution a{color:#3b82f6!important;}';
+        doc.head.appendChild(s);
+      } catch(e) {}
+    };
+  }
+})();
+</script>"""

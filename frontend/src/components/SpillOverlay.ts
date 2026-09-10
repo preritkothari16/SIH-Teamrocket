@@ -1,9 +1,9 @@
 import type { PipelineRun } from '../types/schema';
 
 const STATUS_STYLES: Record<string, string> = {
-  new: 'bg-red-900/40 text-red-300 border-red-700/50 shadow-red-900/20',
-  update: 'bg-orange-900/40 text-orange-300 border-orange-700/50 shadow-orange-900/20',
-  possible: 'bg-yellow-900/40 text-yellow-300 border-yellow-700/50 shadow-yellow-900/20',
+  new: 'bg-red-900/50 text-red-300 border-red-700/60 shadow-red-900/30',
+  update: 'bg-orange-900/50 text-orange-300 border-orange-700/60 shadow-orange-900/30',
+  possible: 'bg-yellow-900/50 text-yellow-300 border-yellow-700/60 shadow-yellow-900/30',
   none: 'bg-zinc-800/60 text-zinc-400 border-zinc-700/50',
 };
 
@@ -69,16 +69,16 @@ export class SpillOverlay {
             <div class="rounded-xl bg-zinc-800/40 p-3 border border-zinc-700/30">
               <div class="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Confidence</div>
               <div class="flex items-end gap-2">
-                <span class="text-xl font-bold ${confColor}">${confPct}%</span>
+                <span class="text-xl font-bold ${confColor} font-mono">${confPct}%</span>
                 <div class="w-12 h-1.5 rounded-full bg-zinc-700/50 overflow-hidden mb-1.5">
-                  <div class="h-full rounded-full ${conf >= 0.8 ? 'bg-emerald-500' : conf >= 0.5 ? 'bg-amber-500' : 'bg-red-500'}" style="width:${confPctNum}%"></div>
+                  <div class="h-full rounded-full ${conf >= 0.8 ? 'bg-emerald-400' : conf >= 0.5 ? 'bg-amber-400' : 'bg-red-400'}" style="width:${confPctNum}%"></div>
                 </div>
               </div>
             </div>
             <div class="rounded-xl bg-zinc-800/40 p-3 border border-zinc-700/30">
               <div class="text-[10px] text-zinc-500 uppercase tracking-wider mb-1">Area</div>
               <div class="flex items-end gap-1">
-                <span class="text-xl font-bold text-zinc-100">${spill.area_km2.toFixed(2)}</span>
+                <span class="text-xl font-bold text-zinc-100 font-mono">${spill.area_km2.toFixed(2)}</span>
                 <span class="text-xs text-zinc-500 mb-1">km&sup2;</span>
               </div>
             </div>
@@ -98,14 +98,14 @@ export class SpillOverlay {
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18"/></svg>
                 Elongation
               </span>
-              <span class="text-xs text-zinc-300">${spill.elongation.toFixed(2)}x</span>
+              <span class="text-xs text-zinc-300 font-mono">${spill.elongation.toFixed(2)}x</span>
             </div>
             <div class="flex items-center justify-between py-1.5 border-b border-zinc-800/30">
               <span class="text-xs text-zinc-500 flex items-center gap-1.5">
                 <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
                 Bearing
               </span>
-              <span class="text-xs text-zinc-300">${spill.major_axis_bearing.toFixed(1)}&deg;</span>
+              <span class="text-xs text-zinc-300 font-mono">${spill.major_axis_bearing.toFixed(1)}&deg;</span>
             </div>
             <div class="flex items-center justify-between py-1.5">
               <span class="text-xs text-zinc-500 flex items-center gap-1.5">
@@ -138,7 +138,7 @@ export class SpillOverlay {
               <div class="flex gap-2">
                 ${drift!.forecast!.slice(0, 4).map((f: any) => `
                   <div class="flex-1 text-center p-2 rounded-lg bg-zinc-800/40 border border-zinc-700/30">
-                    <div class="text-xs font-bold text-amber-400">+${f.hours}h</div>
+                    <div class="text-xs font-bold text-amber-400 font-mono">+${f.hours}h</div>
                     <div class="text-[10px] text-zinc-500 mt-0.5">${new Date(f.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                   </div>
                 `).join('')}

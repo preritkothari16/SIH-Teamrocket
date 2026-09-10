@@ -245,9 +245,11 @@ function drawOverlay(
   }
 
   // ── Scan-line sweep (decorative rotating arc) ──
-  // Only draw when no spill is selected/focused, to avoid visual clutter
-  const isSelecting = selectedRunId !== null;
-  if (!isSelecting) {
+  // Only draw when no spill is selected/focused, to avoid visual clutter.
+  // Also skip when reduced-motion is enabled.
+  const isSelecting = selectedId !== null;
+  const reducedMotion = document.body.dataset.reducedMotion === 'true';
+  if (!isSelecting && !reducedMotion) {
     const scanAngle = (now / 6000) * Math.PI * 2; // 6s full rotation
     const cx = w / 2;
     const cy = h / 2;

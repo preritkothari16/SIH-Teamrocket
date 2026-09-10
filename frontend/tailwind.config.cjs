@@ -35,6 +35,7 @@ module.exports = {
       },
       fontFamily: {
         sans: ["Inter", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"],
         display: ["Geist", "sans-serif"],
       },
     },
