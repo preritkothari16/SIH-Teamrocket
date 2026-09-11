@@ -115,6 +115,22 @@
         <div id="vessel-drawer-content" class="max-h-[35vh] overflow-y-auto"></div>
       </div>
 
+      <!-- Zoom controls: Google-Maps-style +/-/reset stack. Anchored above
+           the stats strip and clear of the sidebar (shifted right of it at
+           lg: where the sidebar is permanently visible), so it never
+           collides with the detail stack or the vessel drawer either. -->
+      <div id="zoom-controls" class="absolute bottom-16 left-4 lg:left-[336px] z-20 flex flex-col gap-1">
+        <button id="zoom-in-btn" class="w-9 h-9 flex items-center justify-center rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" aria-label="Zoom in" title="Zoom in">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button id="zoom-out-btn" class="w-9 h-9 flex items-center justify-center rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" aria-label="Zoom out" title="Zoom out">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>
+        </button>
+        <button id="zoom-reset-btn" class="w-9 h-9 flex items-center justify-center rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" aria-label="Reset zoom" title="Reset zoom">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+        </button>
+      </div>
+
       <!-- Globe legend: top-right, clear of RunList. Hidden below sm — at
            phone width it has nowhere to sit that doesn't collide with the
            detail stack, and it's a reference aid, not core functionality. -->

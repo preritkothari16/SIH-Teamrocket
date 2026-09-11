@@ -78,6 +78,7 @@ export class App {
     this.setupErrorButtons();
     this.setupReportButton();
     this.setupModelInfoToggle();
+    this.setupZoomControls();
     void this.loadRegions();
     void this.loadModelInfo();
     await this.loadAllRuns();
@@ -259,6 +260,12 @@ export class App {
         console.error('Failed to fetch report:', err);
       }
     });
+  }
+
+  private setupZoomControls(): void {
+    document.getElementById('zoom-in-btn')?.addEventListener('click', () => this.globe.zoomIn());
+    document.getElementById('zoom-out-btn')?.addEventListener('click', () => this.globe.zoomOut());
+    document.getElementById('zoom-reset-btn')?.addEventListener('click', () => this.globe.resetZoom());
   }
 
   private setupRunListToggle(): void {

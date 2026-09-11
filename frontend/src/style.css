@@ -11,12 +11,6 @@
   bottom: calc(35vh + 4.5rem);
 }
 
-/* Globe container */
-#globe-container {
-  transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1);
-  transform-origin: center center;
-}
-
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 5px;
@@ -127,7 +121,4 @@ body[data-reduced-motion="true"] .animate-fade-in {
 body[data-reduced-motion="true"] .card-hover:hover {
   transform: none;
   box-shadow: none;
-}
-body[data-reduced-motion="true"] #globe-container {
-  transition: none;
 }
