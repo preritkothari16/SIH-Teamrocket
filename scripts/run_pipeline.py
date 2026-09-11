@@ -40,7 +40,9 @@ if str(REPO_ROOT) not in sys.path:  # allow `python scripts/run_pipeline.py`
 from src.ais.loader import load_ais  # noqa: E402
 from src.alerts.manager import process_spill  # noqa: E402
 from src.alerts.registry import SpillRegistry  # noqa: E402
+from src.api.registry import forecast_to_contract, vessels_to_contract  # noqa: E402
 from src.config import Settings, get_settings  # noqa: E402
+from src.db import database_url  # noqa: E402
 from src.drift.forward import forecast_drift  # noqa: E402
 from src.drift.hindcast import hindcast_origin  # noqa: E402
 from src.env_data.service import get_environment  # noqa: E402
@@ -210,6 +212,20 @@ def run(
             "spill": spill, "alert": decision.to_dict(), "vessels": vessels,
             "drift_forecast": drift_forecast,
         })
+
+        # Step 10.2: attribution/drift only exist by this point in the loop
+        # (register()/update() ran earlier, inside process_spill(), before
+        # either existed) - so this is its own registry call, not folded
+        # into that one. Postgres-only; a documented no-op on sqlite, but
+        # skipped here entirely rather than even opening one, since sqlite
+        # never needs it.
+        if decision.alert and decision.spill_id and database_url(settings):
+            with SpillRegistry(path=registry_path, settings=settings) as registry:
+                registry.set_vessels_and_drift(
+                    decision.spill_id,
+                    vessels_to_contract(vessels),
+                    {"forecast": forecast_to_contract(drift_forecast), "hindcast": []},
+                )
 
     if len(spills) > max_printed:
         print(f"      ... {len(spills) - max_printed} more spill(s) evaluated")

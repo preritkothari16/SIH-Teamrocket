@@ -61,6 +61,12 @@ class SpillRow(Base):
     rules_fired = Column(JSONB, nullable=False)
     first_seen = Column(DateTime(timezone=True), nullable=False)
     last_updated = Column(DateTime(timezone=True), nullable=False)
+    # Step 10.2 (migrations/002): NULL means "not computed yet", distinct
+    # from an empty list/dict ("computed, none found") — see
+    # src/api/registry.py::_get_run_postgres() for the read-side of that
+    # distinction.
+    vessels_json = Column(JSONB, nullable=True)
+    drift_json = Column(JSONB, nullable=True)
 
 
 #: The alert manager's raw status word (``src/alerts/manager.py::AlertDecision

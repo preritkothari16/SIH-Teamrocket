@@ -7,9 +7,13 @@ Three sources are supported, in priority order:
    the only source that survives a stateless deploy (Render, etc.): the
    other two read the local filesystem, which a fresh container doesn't
    have. One row per *alerted* spill (see ``src/alerts/registry.py`` — the
-   only thing that ever writes to this table); vessels and drift are not
-   columns on it, so a Postgres-backed run always reports an empty vessel
-   list and empty drift, regardless of what the original pipeline run found.
+   only thing that ever writes to this table). Step 10.2 added
+   ``vessels_json``/``drift_json`` columns (``migrations/002``); NULL there
+   means "not computed yet for this spill" (falls back to an empty
+   list/empty forecast+hindcast), populated once
+   ``scripts/run_pipeline.py`` calls
+   :meth:`src.alerts.registry.SpillRegistry.set_vessels_and_drift` after
+   attribution/drift actually run for it.
 2. **``<scene_id>/pipeline_result.json``** — the full Phase 3 combined
    output from ``scripts/run_pipeline.py``, read straight off
    ``data/processed/`` (local dev only). Contains spills, alert decisions,
@@ -185,9 +189,13 @@ def _get_run_postgres(scene_id: str, settings: Settings) -> Optional[Dict[str, A
             "first_seen": row.first_seen.isoformat() if row.first_seen else "",
             "last_updated": row.last_updated.isoformat() if row.last_updated else "",
         },
-        # Not columns on this table — see the module docstring.
-        "vessels": [],
-        "drift": {"forecast": [], "hindcast": []},
+        # Step 10.2 (migrations/002): NULL means "not computed yet" (this
+        # spill was never alerted through run_pipeline.py's full chain, or
+        # predates these columns) — only then do the empty defaults apply.
+        # An empty list/dict already stored (attribution/drift ran, found
+        # nothing) is returned as-is, not collapsed into the same default.
+        "vessels": row.vessels_json if row.vessels_json is not None else [],
+        "drift": row.drift_json if row.drift_json is not None else {"forecast": [], "hindcast": []},
         "provenance": {
             "sar_source": None,
             "sar_scene_id": row.scene_id,
@@ -393,16 +401,32 @@ def _spill_entry_to_contract(
         "last_updated": last_updated,
     }
 
-    # Map backend vessels to frontend vessels
+    return {
+        "spill": spill,
+        "alert": alert,
+        "vessels": vessels_to_contract(vessels_raw),
+        "drift": {"forecast": forecast_to_contract(entry.get("drift_forecast", [])), "hindcast": []},
+    }
+
+
+def vessels_to_contract(vessels_raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """``run_pipeline.py``'s raw candidate-vessel dicts (``vessel_name``,
+    a ``track`` list of ``{lon, lat, timestamp}`` points, ...) to the
+    frontend's ``Vessel`` shape (``name``, a ``track`` ``LineString``, ...).
+
+    Used both by the file-based path above and by ``scripts/run_pipeline.py``
+    itself before writing ``vessels_json`` to Postgres (Step 10.2) - one
+    mapping, not two independent copies that could drift apart, same
+    precedent as :func:`src.db.map_alert_status`.
+    """
     vessels = []
     for v in vessels_raw:
-        # Extract track coordinates as LineString
         track_coords = []
         if "track" in v and isinstance(v["track"], list):
             for point in v["track"]:
                 if isinstance(point, dict) and "lon" in point and "lat" in point:
                     track_coords.append([float(point["lon"]), float(point["lat"])])
-        
+
         vessels.append({
             "mmsi": str(v.get("mmsi", "")),
             "name": v.get("vessel_name", ""),
@@ -413,16 +437,10 @@ def _spill_entry_to_contract(
             "cpa_time": v.get("cpa_time", ""),
             "track": {"type": "LineString", "coordinates": track_coords},
         })
-
-    return {
-        "spill": spill,
-        "alert": alert,
-        "vessels": vessels,
-        "drift": {"forecast": _forecast_to_contract(entry.get("drift_forecast", [])), "hindcast": []},
-    }
+    return vessels
 
 
-def _forecast_to_contract(drift_forecast: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def forecast_to_contract(drift_forecast: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """``run_pipeline.py``'s ``drift_forecast`` (``hours_elapsed``/``time``/``polygon``)
     to the frontend's ``ForecastEntry`` (``hours``/``time``/``polygon``)."""
     return [

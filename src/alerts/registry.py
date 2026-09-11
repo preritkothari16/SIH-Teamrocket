@@ -437,5 +437,44 @@ class SpillRegistry:
             rows = session.execute(stmt).scalars().all()
         return [_pg_row_to_record(r) for r in rows]
 
+    # ----------------------------------------------------------------- #
+    # vessels/drift (Step 10.2) — Postgres-only, same precedent as
+    # confidence/bbox/major_axis_bearing/elongation/rules_fired already
+    # being Postgres-only kwargs on register()/update(): the sqlite schema
+    # (SCHEMA above) has no such columns, and every existing sqlite-backed
+    # call site/test predates this and shouldn't have to change.
+    # ----------------------------------------------------------------- #
+    def set_vessels_and_drift(
+        self, spill_id: str, vessels: List[Dict[str, Any]], drift: Dict[str, Any],
+    ) -> None:
+        """Attach the ranked vessel list and drift forecast/hindcast to an
+        already-registered event, once attribution/drift have actually run
+        for it (``scripts/run_pipeline.py`` — after ``register()``/
+        ``update()``, which happen during alert evaluation, before either
+        of those exist yet).
+
+        A documented no-op on the sqlite backend — there is nothing there
+        to write these into, and this project's whole test suite staying
+        offline by default depends on that being fine, not an error.
+        """
+        if self._backend != "postgres":
+            return
+
+        from sqlalchemy import select
+
+        from src.db import SpillRow
+
+        with self._Session() as session:
+            row = (
+                session.execute(select(SpillRow).where(SpillRow.spill_id == spill_id))
+                .scalars()
+                .first()
+            )
+            if row is None:
+                raise RegistryError(f"no registered spill {spill_id!r} to attach vessels/drift to")
+            row.vessels_json = vessels
+            row.drift_json = drift
+            session.commit()
+
 
 __all__ = ["SpillRegistry", "SpillRecord", "RegistryError"]

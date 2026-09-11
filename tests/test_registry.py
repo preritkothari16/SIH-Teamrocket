@@ -102,3 +102,25 @@ class TestContextManager:
         reg.close()
         with pytest.raises(sqlite3.ProgrammingError):
             reg.get("X")
+
+
+class TestSetVesselsAndDrift:
+    """Step 10.2: sqlite has no vessels_json/drift_json columns (Postgres-
+    only, matching confidence/bbox/major_axis_bearing/elongation/rules_fired's
+    existing precedent) - set_vessels_and_drift() must be a documented no-op
+    here, not an error, so the offline test suite stays offline."""
+
+    def test_is_a_no_op_on_sqlite(self, db: Path) -> None:
+        with SpillRegistry(path=db) as reg:
+            reg.register("SPILL-VD", _GEO, 0, 0, 1.0, _EARLY, status="active")
+            reg.set_vessels_and_drift(
+                "SPILL-VD", [{"mmsi": "1"}], {"forecast": [], "hindcast": []},
+            )
+            # unchanged: still just the sqlite columns, no exception either.
+            record = reg.get("SPILL-VD")
+        assert record is not None
+        assert record.spill_id == "SPILL-VD"
+
+    def test_is_a_no_op_even_for_an_unregistered_spill(self, db: Path) -> None:
+        with SpillRegistry(path=db) as reg:
+            reg.set_vessels_and_drift("never-registered", [], {})  # does not raise

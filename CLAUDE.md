@@ -290,6 +290,77 @@ done last, one step at a time — same working agreement as every other phase.
   actually renders - both via a live `uvicorn` + `npm run dev` pair driven
   with Playwright.
 
+## Phase 10 - fully switching to Postgres
+
+`src/db.py`'s `SpillRow` was columns-for-spill-and-alert-only until this
+phase; `_get_run_postgres()` (`src/api/registry.py`) returned
+`vessels: []`/`drift: {forecast: [], hindcast: []}` **unconditionally**.
+Closed before anything got called "switched":
+
+- **`migrations/001_create_spills.sql`, `migrations/002_add_vessels_and_drift.sql`**
+  (+ `migrations/README.md`) - the first tracked, idempotent record of the
+  `spills` table's shape (previously "created outside this repo,"
+  unverified from the repo alone). `002` adds `vessels_json`/`drift_json`
+  JSONB columns - plain columns on the existing table, not new normalized
+  ones, same pattern `bbox`/`rules_fired` already use. **Both applied to
+  the real, live Supabase project** (`fxvqzthhpzpdtgrhlhni`) via the
+  Supabase MCP tools available in this environment, and verified via
+  `list_tables` afterward - not just written and hoped for.
+- **`src/alerts/registry.py::SpillRegistry.set_vessels_and_drift()`** -
+  Postgres-only; a documented no-op on sqlite (same precedent as
+  `confidence`/`bbox`/`major_axis_bearing`/`elongation`/`rules_fired`
+  already being Postgres-only kwargs on `register()`/`update()`).
+  `scripts/run_pipeline.py` calls it after attribution/drift are actually
+  computed for an alerted spill (a separate call from the
+  `process_spill()` one, since attribution/drift don't exist yet at that
+  point) - gated on `database_url(settings)`, skipped entirely otherwise.
+- **`src/api/registry.py`**: `_get_run_postgres()` now reads
+  `row.vessels_json`/`row.drift_json`, falling back to the old empty
+  defaults only when the column is actually `NULL` ("not computed yet" -
+  distinct from an empty list/dict, "computed, none found"). The
+  vessel/drift shape-translation logic that used to live inline in
+  `_spill_entry_to_contract()` is now two reusable functions,
+  `vessels_to_contract()`/`forecast_to_contract()` (renamed from a private
+  `_forecast_to_contract()`) - `scripts/run_pipeline.py` imports both, so
+  there's one mapping instead of two copies that could drift apart, same
+  reasoning as `src/db.py::map_alert_status` already gets its own comment
+  for.
+- **`scripts/check_db_connection.py`** - run this first, before trusting
+  anything else in this phase. Connects via `src.db.get_engine()`, runs
+  `SELECT 1` + `SELECT postgis_version()`, and on failure prints the
+  Session-Pooler-vs-direct-hostname fix by name rather than a bare
+  traceback.
+- **`scripts/backfill_postgres.py`** - one-off, not wired into the normal
+  pipeline: reads `data/processed/demo_pipeline/pipeline_result.json` (the
+  one real, "real-scene verified" run in this repo) and calls
+  `register()`/`update()` + `set_vessels_and_drift()` with its actual
+  data. **Could not be run from this environment** (see below) - the
+  equivalent write was made directly against the live table via the
+  Supabase MCP tools instead, and verified byte-for-byte against what
+  `vessels_to_contract()`/`forecast_to_contract()` compute from that same
+  file, so the live table now has exactly what the script would have
+  written.
+
+**Connectivity, this session's own environment**: every attempt to reach
+Postgres on port 5432 - the direct `db.<ref>.supabase.co` host (DNS
+failure) and both plausible Session Pooler hostnames for this project's
+region, `aws-0-ap-south-1.pooler.supabase.com` and
+`aws-1-ap-south-1.pooler.supabase.com` (both resolved fine over IPv4, both
+timed out on the actual TCP connection) - failed. One earlier row in
+`spills` (`00000_spill_082`, from a real `run_pipeline.py` run against
+scene `00000` in an earlier turn of this same session) proves a real
+connection *did* succeed once, so this is intermittent/environment-level,
+not a settled "IPv6-only, always broken" fact - and not evidence either
+way about Render's own network. The **Supabase MCP tools available in
+this environment reach the same project over HTTPS (the management API),
+independent of this entirely** - used throughout this phase to apply
+migrations and verify/backfill data no matter what raw-TCP connectivity
+was doing at the time. `.env` was **not** changed to a guessed pooler
+string - guessing wrong would replace a "sometimes works" config with a
+"definitely unverified" one; get the exact string from the Supabase
+dashboard (Project Settings -> Database -> Connection pooling) and confirm
+it with `scripts/check_db_connection.py` from a normal network instead.
+
 ## Environment facts
 
 - venv at `.venv/` (Python 3.11.9). Run things as `.venv/Scripts/python.exe -m ...`.

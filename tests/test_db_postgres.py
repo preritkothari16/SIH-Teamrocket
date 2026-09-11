@@ -134,3 +134,45 @@ class TestApiRegistryPostgres:
         assert run["spill"]["major_axis_bearing"] == 12.0
         assert run["vessels"] == []
         assert run["drift"] == {"forecast": [], "hindcast": []}
+
+    def test_vessels_and_drift_default_to_empty_then_reflect_set_vessels_and_drift(
+        self, spill_id: str,
+    ) -> None:
+        """Step 10.2: vessels_json/drift_json start out NULL ("not computed
+        yet") and get_run() reports the same empty defaults as before this
+        step existed - then set_vessels_and_drift() populates them and
+        get_run() reflects exactly what was stored, not a copy of it."""
+        now = datetime.now(timezone.utc)
+        scene_id = f"scene_{spill_id}"
+        vessels = [{
+            "mmsi": "123456789", "name": "TEST VESSEL", "vessel_type": "tanker",
+            "score": 0.9, "explanation": "test", "cpa_distance_km": 1.1,
+            "cpa_time": now.isoformat(),
+            "track": {"type": "LineString", "coordinates": [[10.0, 55.0], [10.05, 55.02]]},
+        }]
+        drift = {"forecast": [{"hours": 6, "time": now.isoformat(), "polygon": {"type": "Polygon", "coordinates": []}}], "hindcast": []}
+
+        with SpillRegistry() as reg:
+            reg.register(
+                spill_id, geometry=GEOM, centroid_lon=10.0, centroid_lat=55.0,
+                area_km2=1.0, seen_at=now, status="possible", scene_id=scene_id,
+                confidence=0.8,
+            )
+
+        run_before = get_run(scene_id)
+        assert run_before is not None
+        assert run_before["vessels"] == []
+        assert run_before["drift"] == {"forecast": [], "hindcast": []}
+
+        with SpillRegistry() as reg:
+            reg.set_vessels_and_drift(spill_id, vessels, drift)
+
+        run_after = get_run(scene_id)
+        assert run_after is not None
+        assert run_after["vessels"] == vessels
+        assert run_after["drift"] == drift
+
+    def test_set_vessels_and_drift_raises_for_an_unregistered_spill(self) -> None:
+        with SpillRegistry() as reg:
+            with pytest.raises(RegistryError, match="no registered spill"):
+                reg.set_vessels_and_drift("no-such-spill-id", [], {"forecast": [], "hindcast": []})
