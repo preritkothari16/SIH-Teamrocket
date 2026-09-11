@@ -145,7 +145,12 @@ def test_get_current_uses_the_configured_dataset_path_when_omitted(current_fixtu
 
 
 def test_get_current_raises_a_clear_error_with_no_source_configured() -> None:
-    settings = load_settings()  # default: current_dataset_path is None, no CMEMS creds
+    settings = load_settings()
+    settings = settings.model_copy(
+        update={"env_data": settings.env_data.model_copy(
+            update={"current_dataset_path": None}
+        )}
+    )
     with pytest.raises(EnvDataError, match="no current data source available"):
         get_current(20.0, 70.0, T0, settings=settings)
 

@@ -3,6 +3,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ===================================================================
+   SAR-OilSpill Design System
+   =================================================================== */
+:root {
+  /* Core palette */
+  --space-black: #060911;
+  --ocean-deep: #0E3B54;
+  --ocean-bright: #2FA8D8;
+  --earth-green: #1F5C43;
+  --earth-bright: #4FA876;
+  --signal-amber: #E0A23D;
+  --signal-red: #C6524A;
+
+  /* Semantic aliases */
+  --bg-primary: var(--space-black);
+  --bg-panel: color-mix(in srgb, var(--ocean-deep) 60%, var(--space-black));
+  --border-panel: color-mix(in srgb, var(--ocean-bright) 25%, transparent);
+  --text-primary: #E8F1F4;
+  --text-muted: color-mix(in srgb, var(--ocean-bright) 45%, #8A9BA5);
+  --accent-primary: var(--ocean-bright);
+  --accent-secondary: var(--earth-bright);
+  --status-new: var(--signal-red);
+  --status-possible: var(--signal-amber);
+  --status-clear: var(--earth-bright);
+  --glow-color: var(--ocean-bright);
+}
+
 /* Globe container */
 #globe-container {
   transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -17,35 +44,16 @@
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(113, 113, 122, 0.4);
+  background: rgba(47, 168, 216, 0.25);
   border-radius: 10px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(113, 113, 122, 0.6);
+  background: rgba(47, 168, 216, 0.4);
 }
 
-/* Light theme (applied when data-theme="light") */
-:root[data-theme="light"] {
-  --bg: #f8f9fa;
-  --surface: #e9ecef;
-  --surface-alt: #dee2e6;
-  --border: #ced4da;
-  --text: #212529;
-  --text-muted: #6c757d;
-}
-
-/* Dark theme (applied when data-theme="dark", or no attribute for default) */
-:root[data-theme="dark"] {
-  --bg: #0f0f13;
-  --surface: #1a1a22;
-  --surface-alt: #222230;
-  --border: #2a2a38;
-  --text: #e4e4ec;
-  --text-muted: #8888a0;
-}
 @keyframes glow-pulse {
-  0%, 100% { box-shadow: 0 0 8px 3px rgba(239, 68, 68, 0.4); }
-  50% { box-shadow: 0 0 20px 6px rgba(239, 68, 68, 0.65); }
+  0%, 100% { box-shadow: 0 0 8px 3px color-mix(in srgb, var(--signal-red) 40%, transparent); }
+  50% { box-shadow: 0 0 20px 6px color-mix(in srgb, var(--signal-red) 65%, transparent); }
 }
 .glow-pulse {
   animation: glow-pulse 700ms ease-in-out infinite;
@@ -81,14 +89,14 @@
   opacity: 0.3;
   z-index: -1;
 }
-.status-badge-new::before { background: rgb(239, 68, 68); }
-.status-badge-possible::before { background: rgb(234, 179, 8); }
+.status-badge-new::before { background: var(--signal-red); }
+.status-badge-possible::before { background: var(--signal-amber); }
 
 /* Confidence ring */
 .confidence-ring {
   background: conic-gradient(
     var(--ring-color) var(--ring-pct),
-    rgb(39, 39, 42) var(--ring-pct)
+    color-mix(in srgb, var(--ocean-deep) 40%, var(--space-black)) var(--ring-pct)
   );
 }
 
@@ -106,10 +114,16 @@
   @apply text-[10px] px-2 py-0.5 rounded-md font-medium border transition-colors;
 }
 .rule-passed {
-  @apply bg-emerald-900/30 text-emerald-400 border-emerald-800/50;
+  @apply border border-opacity-30;
+  background: color-mix(in srgb, var(--earth-bright) 20%, transparent);
+  color: var(--earth-bright);
+  border-color: color-mix(in srgb, var(--earth-bright) 40%, transparent);
 }
 .rule-failed {
-  @apply bg-red-900/30 text-red-400 border-red-800/50;
+  @apply border border-opacity-30;
+  background: color-mix(in srgb, var(--signal-red) 20%, transparent);
+  color: var(--signal-red);
+  border-color: color-mix(in srgb, var(--signal-red) 40%, transparent);
 }
 
 /* Vessel rank badge */
@@ -117,16 +131,24 @@
   @apply w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0;
 }
 .rank-1 {
-  @apply bg-amber-500/20 text-amber-400 border border-amber-500/30;
+  background: color-mix(in srgb, var(--signal-amber) 20%, transparent);
+  color: var(--signal-amber);
+  border: 1px solid color-mix(in srgb, var(--signal-amber) 30%, transparent);
 }
 .rank-2 {
-  @apply bg-zinc-500/20 text-zinc-300 border border-zinc-600/30;
+  background: color-mix(in srgb, var(--text-muted) 15%, transparent);
+  color: var(--text-muted);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent);
 }
 .rank-3 {
-  @apply bg-orange-900/30 text-orange-400 border border-orange-800/30;
+  background: color-mix(in srgb, var(--ocean-bright) 20%, transparent);
+  color: var(--ocean-bright);
+  border: 1px solid color-mix(in srgb, var(--ocean-bright) 30%, transparent);
 }
 .rank-default {
-  @apply bg-zinc-800 text-zinc-400 border border-zinc-700;
+  background: color-mix(in srgb, var(--ocean-deep) 60%, var(--space-black));
+  color: var(--text-muted);
+  border: 1px solid var(--border-panel);
 }
 
 /* Reduce motion: disable all animations and transitions */

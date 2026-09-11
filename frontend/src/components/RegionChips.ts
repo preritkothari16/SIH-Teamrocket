@@ -17,12 +17,12 @@ export class RegionChips {
 
     const chipClass = (active: boolean, disabled: boolean): string => {
       if (disabled) {
-        return 'bg-zinc-800/40 border-zinc-700/30 text-zinc-600 cursor-not-allowed';
+        return 'bg-ocean-deep/30 border-border-panel/50 text-txt-muted/50 cursor-not-allowed';
       }
       if (active) {
-        return 'bg-blue-600/90 border-blue-500/50 text-white shadow-lg shadow-blue-900/30';
+        return 'bg-accent-primary/90 border-accent-primary/50 text-white shadow-lg shadow-accent-primary/20';
       }
-      return 'bg-zinc-800/80 border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white';
+      return 'bg-ocean-deep/60 border-border-panel text-txt-primary hover:bg-ocean-deep hover:text-white';
     };
 
     const allChip = `

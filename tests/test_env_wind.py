@@ -178,7 +178,12 @@ def test_get_wind_uses_the_configured_dataset_path_when_omitted(wind_fixture: Pa
 
 
 def test_get_wind_raises_a_clear_error_with_no_source_configured() -> None:
-    settings = load_settings()  # default: wind_dataset_path is None, no CDS creds
+    settings = load_settings()
+    settings = settings.model_copy(
+        update={"env_data": settings.env_data.model_copy(
+            update={"wind_dataset_path": None}
+        )}
+    )
     with pytest.raises(EnvDataError, match="no wind data source available"):
         get_wind(20.0, 70.0, T0, settings=settings)
 

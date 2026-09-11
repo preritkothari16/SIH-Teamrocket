@@ -189,10 +189,10 @@ attribution:
 
 # --- environmental data: wind (step 3.1), currents later (step 4.1) ---
 env_data:
-  wind_dataset_path: null        # local/cached NetCDF (ERA5 u10/v10); null -> CDS API if configured
+  wind_dataset_path: data/env/demo_wind.nc  # local demo fixture (ERA5-shaped u10/v10)
   interpolation_method: linear   # linear | nearest, spatial lookup
   cds_area_buffer_deg: 1.0       # bounding-box half-width around a CDS wind fetch request
-  current_dataset_path: null     # local/cached NetCDF (CMEMS/HYCOM uo/vo); null -> CMEMS if configured
+  current_dataset_path: data/env/demo_current.nc  # local demo fixture (CMEMS-shaped uo/vo)
   cmems_area_buffer_deg: 1.0     # bounding-box half-width around a CMEMS current fetch request
 
 # --- drift prediction (step 5.x) ---
