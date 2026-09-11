@@ -351,6 +351,23 @@ source; `.claude/skills/supabase*` is Windows's non-symlink materialized
 copy of it and is gitignored, not duplicated into version control) and
 auditing the existing migrations against it before they went live.
 
+**`migrations/` and `supabase/migrations/` drifted once already, caught and
+fixed**: the indexes migration above only ever landed in `supabase/
+migrations/` (applied live via the Supabase MCP tools), never mirrored into
+the numbered `migrations/` folder that `scripts/apply_migrations.py`/the
+Dockerfile actually run at deploy time - a fresh deploy through that path
+would have come up without both indexes, silently. Fixed additively:
+`migrations/003_enable_rls_on_spills.sql` and
+`migrations/004_add_spills_indexes.sql` now mirror the two
+`supabase/migrations/` files that had no counterpart (RLS enable +
+indexes), both idempotent, verified as a no-op against the live DB (which
+already has both). **`supabase/migrations/` is the source of truth** going
+forward - author schema changes there first (CLI-tracked, drift-checked via
+`supabase db push --dry-run`) - and hand-mirror the file into `migrations/`
+as a same-PR step; `migrations/README.md` says this now too. Neither folder
+was deleted - `migrations/` stays because the Docker image has no `supabase`
+CLI to run the other path at deploy time.
+
 **The live Render deployment's `/api/runs` 500 - root cause found and
 fixed, verified with a real headless browser against production, not just
 curl:**
