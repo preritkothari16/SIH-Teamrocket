@@ -5,8 +5,8 @@ Endpoints
 GET  /api/runs              — list all processed runs (summary)
 GET  /api/runs/{id}         — full PipelineRun contract for one scene
 GET  /api/runs/{id}/report  — Step 5.3 report; regenerated on request if no local file exists
-POST /api/runs              — trigger detection on a scene (sync, hackathon)
-POST /api/runs/{id}/ask     — Step 8.1 natural-language Q&A over a run
+POST /api/runs              — trigger detection on a scene (sync, hackathon; requires X-API-Key)
+POST /api/runs/{id}/ask     — Step 8.1 natural-language Q&A over a run (requires X-API-Key)
 GET  /api/regions           — Step 8.4 demo region presets
 GET  /api/model/info        — Step 8.3 model card ({trained: false} if untrained)
 
@@ -19,6 +19,7 @@ Usage::
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import subprocess
@@ -27,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
@@ -67,6 +68,26 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --------------------------------------------------------------------------- #
+# Auth gate — the two POST endpoints only (spawn a pipeline subprocess / spend
+# the Anthropic quota). GETs stay public; the frontend never sends this key.
+#
+# Unset API_KEY means every request is rejected (503), never let through —
+# this API is publicly reachable on Render, so "unconfigured" must fail
+# closed, not open. hmac.compare_digest avoids a timing side-channel on the
+# comparison itself.
+# --------------------------------------------------------------------------- #
+def require_api_key(x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")) -> None:
+    expected = get_settings().credentials.resolve().get("api_key")
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="API_KEY not configured on the server — this endpoint is disabled",
+        )
+    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=401, detail="Missing or invalid X-API-Key header")
 
 
 # --------------------------------------------------------------------------- #
@@ -160,7 +181,7 @@ def api_get_report(scene_id: str):
     return HTMLResponse(content=html)
 
 
-@app.post("/api/runs", response_model=PipelineRun)
+@app.post("/api/runs", response_model=PipelineRun, dependencies=[Depends(require_api_key)])
 def api_trigger_run(request: RunRequest) -> PipelineRun:
     """Trigger detection on a scene.
 
@@ -214,7 +235,7 @@ def api_trigger_run(request: RunRequest) -> PipelineRun:
     return PipelineRun(**run)
 
 
-@app.post("/api/runs/{scene_id}/ask", response_model=AskResponse)
+@app.post("/api/runs/{scene_id}/ask", response_model=AskResponse, dependencies=[Depends(require_api_key)])
 def api_ask_run(scene_id: str, request: AskRequest) -> AskResponse:
     """Answer a natural-language question about one run (Step 8.1).
 

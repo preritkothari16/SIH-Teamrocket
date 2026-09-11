@@ -13,4 +13,9 @@ services:
       # deploy notes).
       - key: DATABASE_URL
         sync: false
+      # Gates POST /api/runs and POST /api/runs/{id}/ask (src/api/main.py's
+      # require_api_key). Generate the value yourself; unset means those two
+      # endpoints reject every request (fail closed, not open).
+      - key: API_KEY
+        sync: false
     healthCheckPath: /api/health

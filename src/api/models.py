@@ -153,7 +153,8 @@ class RunRequest(BaseModel):
 # Attribution Q&A (Step 8.1)
 # --------------------------------------------------------------------------- #
 class AskRequest(BaseModel):
-    question: str
+    # Bounded so one caller can't send an arbitrarily large prompt to the LLM.
+    question: str = Field(min_length=1, max_length=2000)
 
 
 class AskResponse(BaseModel):

@@ -19,6 +19,18 @@ from src.config import Settings
 
 client = TestClient(app)
 
+# Auth (src/api/main.py::require_api_key) gates only the two POST endpoints.
+# Every test in this module gets a known API_KEY via the autouse fixture
+# below, so pre-existing POST calls keep working once they pass this header;
+# TestApiKeyAuth is what actually exercises the gate itself.
+TEST_API_KEY = "test-api-key-for-suite"
+AUTH_HEADERS = {"X-API-Key": TEST_API_KEY}
+
+
+@pytest.fixture(autouse=True)
+def _api_key_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("API_KEY", TEST_API_KEY)
+
 
 # --------------------------------------------------------------------------- #
 # Fixtures
@@ -526,7 +538,7 @@ class TestContractToPipelineResult:
 
 class TestTriggerRunEndpoint:
     def test_400_without_scene_identifier(self) -> None:
-        resp = client.post("/api/runs", json={})
+        resp = client.post("/api/runs", json={}, headers=AUTH_HEADERS)
         assert resp.status_code == 400
 
 
@@ -544,7 +556,9 @@ class TestAskEndpoint:
         )
 
     def test_404_for_unknown_run(self, populated_spills: Path) -> None:
-        resp = client.post("/api/runs/no-such-scene/ask", json={"question": "who?"})
+        resp = client.post(
+            "/api/runs/no-such-scene/ask", json={"question": "who?"}, headers=AUTH_HEADERS
+        )
         assert resp.status_code == 404
 
     def test_answers_using_the_runs_own_data(
@@ -568,6 +582,7 @@ class TestAskEndpoint:
         resp = client.post(
             f"/api/runs/{SCENE_ID}/ask",
             json={"question": "which vessel is most likely responsible?"},
+            headers=AUTH_HEADERS,
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -588,9 +603,88 @@ class TestAskEndpoint:
 
         monkeypatch.setattr(main_mod, "answer_question", raise_qa_error)
 
-        resp = client.post(f"/api/runs/{SCENE_ID}/ask", json={"question": "who?"})
+        resp = client.post(
+            f"/api/runs/{SCENE_ID}/ask", json={"question": "who?"}, headers=AUTH_HEADERS
+        )
         assert resp.status_code == 503
         assert "ANTHROPIC_API_KEY" in resp.json()["detail"]
+
+
+class TestApiKeyAuth:
+    """src/api/main.py::require_api_key — gates only the two POST endpoints.
+
+    GETs must stay public no matter what; that's the regression that matters
+    most here, since the live frontend never sends this header.
+    """
+
+    # --- POST /api/runs -------------------------------------------------- #
+    def test_post_runs_rejects_missing_key(self) -> None:
+        resp = client.post("/api/runs", json={})
+        assert resp.status_code == 401
+
+    def test_post_runs_rejects_wrong_key(self) -> None:
+        resp = client.post("/api/runs", json={}, headers={"X-API-Key": "wrong"})
+        assert resp.status_code == 401
+
+    def test_post_runs_accepts_right_key(self) -> None:
+        # Right key clears auth; 400 comes from the handler's own payload
+        # validation (no scene_path/scene_id) — proof the request reached it.
+        resp = client.post("/api/runs", json={}, headers=AUTH_HEADERS)
+        assert resp.status_code == 400
+
+    # --- POST /api/runs/{id}/ask ------------------------------------------ #
+    def test_post_ask_rejects_missing_key(self, populated_spills: Path) -> None:
+        resp = client.post(f"/api/runs/{SCENE_ID}/ask", json={"question": "who?"})
+        assert resp.status_code == 401
+
+    def test_post_ask_rejects_wrong_key(self, populated_spills: Path) -> None:
+        resp = client.post(
+            f"/api/runs/{SCENE_ID}/ask",
+            json={"question": "who?"},
+            headers={"X-API-Key": "wrong"},
+        )
+        assert resp.status_code == 401
+
+    def test_post_ask_accepts_right_key(
+        self, populated_spills: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from src.api import main as main_mod
+        from src.attribution.qa import QAAnswer
+
+        monkeypatch.setattr(
+            main_mod, "answer_question",
+            lambda run, question, **kwargs: QAAnswer(answer="ok", cited_vessels=[]),
+        )
+        resp = client.post(
+            f"/api/runs/{SCENE_ID}/ask", json={"question": "who?"}, headers=AUTH_HEADERS
+        )
+        assert resp.status_code == 200
+
+    # --- unset API_KEY must fail closed, never open ----------------------- #
+    def test_unset_api_key_rejects_even_with_a_header_sent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("API_KEY", raising=False)
+        resp = client.post("/api/runs", json={}, headers=AUTH_HEADERS)
+        assert resp.status_code == 503
+
+    # --- question length cap ---------------------------------------------- #
+    def test_ask_rejects_an_overlong_question(self, populated_spills: Path) -> None:
+        resp = client.post(
+            f"/api/runs/{SCENE_ID}/ask",
+            json={"question": "x" * 2001},
+            headers=AUTH_HEADERS,
+        )
+        assert resp.status_code == 422
+
+    # --- GETs stay public, with or without the header ---------------------- #
+    def test_get_endpoints_work_with_no_key_at_all(self, populated_spills: Path) -> None:
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/runs").status_code == 200
+        assert client.get(f"/api/runs/{SCENE_ID}").status_code == 200
+        assert client.get(f"/api/runs/{SCENE_ID}/report").status_code == 200
+        assert client.get("/api/regions").status_code == 200
+        assert client.get("/api/model/info").status_code == 200
 
 
 class TestRegionsEndpoint:
