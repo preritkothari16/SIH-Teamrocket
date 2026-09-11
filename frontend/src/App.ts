@@ -26,6 +26,7 @@ export class App {
 
   private runListPanel: HTMLElement;
   private runListToggle: HTMLElement;
+  private detailStack: HTMLElement;
   private globeHint: HTMLElement;
   private loadingEl: HTMLElement;
   private errorEl: HTMLElement;
@@ -44,6 +45,7 @@ export class App {
 
     this.runListPanel = document.getElementById('run-list-panel')!;
     this.runListToggle = document.getElementById('run-list-toggle')!;
+    this.detailStack = document.getElementById('detail-stack')!;
     this.globeHint = document.getElementById('globe-hint')!;
     this.loadingEl = document.getElementById('loading-state')!;
     this.errorEl = document.getElementById('error-state')!;
@@ -175,6 +177,7 @@ export class App {
       this.spillOverlay.render(null);
       this.provenancePanel.render(null);
       this.vesselDrawer.hide();
+      this.detailStack.classList.remove('drawer-open');
       this.globeHint.style.opacity = '1';
       this.selectedSceneId = null;
       this.reportBtn.hidden = true;
@@ -189,6 +192,11 @@ export class App {
     this.spillOverlay.render(run);
     this.provenancePanel.render(run);
     this.vesselDrawer.render(run.vessels);
+    // Vessel drawer only actually opens when there's something to show
+    // (VesselDrawer.render() no-ops to hidden on an empty list) — keep the
+    // detail stack lifted only in that case, so it doesn't leave a dead gap
+    // when there's no drawer to clear.
+    this.detailStack.classList.toggle('drawer-open', run.vessels.length > 0);
     this.globeHint.style.opacity = '0';
     this.selectedSceneId = run.spill.scene_id;
     this.reportBtn.hidden = false;

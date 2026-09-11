@@ -3,6 +3,14 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Lifts the Data Provenance / SpillOverlay stack clear of the vessel
+   drawer when it's open (App.ts toggles this on #detail-stack) — without
+   it, the drawer's own fixed-position layer covers the lower half of the
+   stack's content regardless of the stack's internal scroll position. */
+#detail-stack.drawer-open {
+  bottom: calc(35vh + 4.5rem);
+}
+
 /* Globe container */
 #globe-container {
   transition: transform 1000ms cubic-bezier(0.16, 1, 0.3, 1);

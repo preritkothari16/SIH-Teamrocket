@@ -53,7 +53,10 @@ export class RunList {
     const areaEl = document.getElementById('stat-area');
     const countEl = document.getElementById('spill-count');
     if (totalEl) totalEl.textContent = String(runs.length);
-    if (alertedEl) alertedEl.textContent = String(runs.filter(r => r.alert?.status === 'new' || r.alert?.status === 'possible').length);
+    // Same predicate as App.ts::updateStatsStrip's #strip-active — these two
+    // widgets used to disagree (this one skipped 'update'); unified so
+    // "Active" in the sidebar and the HUD strip always mean the same count.
+    if (alertedEl) alertedEl.textContent = String(runs.filter(r => !!r.alert?.status && r.alert.status !== 'none').length);
     if (areaEl) areaEl.textContent = runs.reduce((s, r) => s + r.spill.area_km2, 0).toFixed(1);
     if (countEl) countEl.textContent = String(runs.length);
 
