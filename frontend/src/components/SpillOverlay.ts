@@ -1,5 +1,6 @@
 import type { PipelineRun } from '../types/schema';
 import { escapeHtml } from '../utils/escape';
+import { fieldRow } from '../utils/fieldRow';
 
 const STATUS_STYLES: Record<string, string> = {
   new: 'bg-red-900/50 text-red-300 border-red-700/60 shadow-red-900/30',
@@ -87,34 +88,22 @@ export class SpillOverlay {
 
           <!-- Properties -->
           <div class="space-y-2">
-            <div class="flex items-center justify-between py-1.5 border-b border-zinc-800/30">
-              <span class="text-xs text-zinc-500 flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                Centroid
-              </span>
-              <span class="text-xs text-zinc-300 font-mono">${spill.centroid.lat.toFixed(4)}, ${spill.centroid.lon.toFixed(4)}</span>
-            </div>
-            <div class="flex items-center justify-between py-1.5 border-b border-zinc-800/30">
-              <span class="text-xs text-zinc-500 flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18"/></svg>
-                Elongation
-              </span>
-              <span class="text-xs text-zinc-300 font-mono">${spill.elongation.toFixed(2)}x</span>
-            </div>
-            <div class="flex items-center justify-between py-1.5 border-b border-zinc-800/30">
-              <span class="text-xs text-zinc-500 flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
-                Bearing
-              </span>
-              <span class="text-xs text-zinc-300 font-mono">${spill.major_axis_bearing.toFixed(1)}&deg;</span>
-            </div>
-            <div class="flex items-center justify-between py-1.5">
-              <span class="text-xs text-zinc-500 flex items-center gap-1.5">
-                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                Acquired
-              </span>
-              <span class="text-xs text-zinc-300 font-mono">${new Date(spill.acquisition_timestamp).toLocaleString()}</span>
-            </div>
+            ${fieldRow('Centroid', `${spill.centroid.lat.toFixed(4)}, ${spill.centroid.lon.toFixed(4)}`, {
+              icon: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+              spacing: 'cozy', divider: true,
+            })}
+            ${fieldRow('Elongation', `${spill.elongation.toFixed(2)}x`, {
+              icon: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18"/></svg>',
+              spacing: 'cozy', divider: true,
+            })}
+            ${fieldRow('Bearing', `${spill.major_axis_bearing.toFixed(1)}°`, {
+              icon: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>',
+              spacing: 'cozy', divider: true,
+            })}
+            ${fieldRow('Acquired', new Date(spill.acquisition_timestamp).toLocaleString(), {
+              icon: '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
+              spacing: 'cozy',
+            })}
           </div>
 
           <!-- Rules Fired -->

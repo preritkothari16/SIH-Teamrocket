@@ -149,6 +149,7 @@ function drawOverlay(
   phi: number, theta: number,
   w: number, h: number,
   selectedId: string | null,
+  hoveredId: string | null,
   now: number,
 ): void {
   ctx.clearRect(0, 0, w, h);
@@ -165,6 +166,7 @@ function drawOverlay(
   for (const m of projected) {
     const { x, y, z } = m.screen;
     const isSelected = m.spillId === selectedId;
+    const isHovered = m.spillId === hoveredId && !isSelected;
     const baseR = markerSize(m) * Math.min(w, h) / 2 * 0.9;
     const alpha = 0.35 + z * 0.65;
 
@@ -224,6 +226,18 @@ function drawOverlay(
       ctx.arc(x, y, selRingR + 4, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(255,255,255,${(0.25 * alpha).toFixed(3)})`;
       ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // ── Hover ring — lighter than selection, gives the same "this is
+    // clickable" feedback the sidebar rows and region chips already have
+    // on hover. Skipped when selected so the two rings don't compete. ──
+    if (isHovered) {
+      const hoverRingR = baseR * 1.6;
+      ctx.beginPath();
+      ctx.arc(x, y, hoverRingR, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${(0.5 * alpha).toFixed(3)})`;
+      ctx.lineWidth = 1.5;
       ctx.stroke();
     }
 
@@ -305,6 +319,7 @@ export class SpillGlobe {
 
   private markers: ValidatedMarker[] = [];
   private selectedRunId: string | null = null;
+  private hoveredRunId: string | null = null;
   private onSelectSpill: (runId: string | null) => void;
 
   private zoomScale = 1;
@@ -413,6 +428,7 @@ export class SpillGlobe {
       this.lastPointerY = e.clientY;
       this.dragStartedAt = { x: e.clientX, y: e.clientY };
       this.canvas.style.cursor = 'grabbing';
+      this.hoveredRunId = null;
 
       if (this.focusAnimating) {
         this.focusAnimating = false;
@@ -420,16 +436,33 @@ export class SpillGlobe {
       }
     };
 
+    const onPointerLeave = () => {
+      this.hoveredRunId = null;
+      if (!this.dragging) this.canvas.style.cursor = 'grab';
+    };
+
     const onPointerMove = (e: PointerEvent) => {
-      if (!this.dragging) return;
-      const dx = e.clientX - this.lastPointerX;
-      const dy = e.clientY - this.lastPointerY;
-      this.phi += dx * 0.005;
-      this.theta = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.theta + dy * 0.005));
-      this.idlePhi = this.phi;
-      this.lastPointerX = e.clientX;
-      this.lastPointerY = e.clientY;
-      this.globe?.update({ phi: this.phi, theta: this.theta });
+      if (this.dragging) {
+        const dx = e.clientX - this.lastPointerX;
+        const dy = e.clientY - this.lastPointerY;
+        this.phi += dx * 0.005;
+        this.theta = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.theta + dy * 0.005));
+        this.idlePhi = this.phi;
+        this.lastPointerX = e.clientX;
+        this.lastPointerY = e.clientY;
+        this.globe?.update({ phi: this.phi, theta: this.theta });
+        return;
+      }
+
+      // Hover feedback — same "this is clickable" affordance the sidebar
+      // rows and region chips already give on :hover; the globe previously
+      // gave none at all until the moment of an actual click.
+      const marker = this.markerAtClientPoint(e.clientX, e.clientY);
+      const newHoveredId = marker?.spillId ?? null;
+      if (newHoveredId !== this.hoveredRunId) {
+        this.hoveredRunId = newHoveredId;
+      }
+      this.canvas.style.cursor = newHoveredId ? 'pointer' : 'grab';
     };
 
     const onPointerUp = (e: PointerEvent) => {
@@ -450,12 +483,14 @@ export class SpillGlobe {
     };
 
     this.canvas.addEventListener('pointerdown', onPointerDown);
+    this.canvas.addEventListener('pointerleave', onPointerLeave);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     this.canvas.style.cursor = 'grab';
 
     this._cleanupPointer = () => {
       this.canvas.removeEventListener('pointerdown', onPointerDown);
+      this.canvas.removeEventListener('pointerleave', onPointerLeave);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
     };
@@ -463,13 +498,13 @@ export class SpillGlobe {
 
   private _cleanupPointer: (() => void) | null = null;
 
-  private handleClick(e: PointerEvent): void {
-    const rect = this.canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const nx = (x / rect.width) * 2 - 1;
-    const ny = (y / rect.height) * 2 - 1;
-
+  /** Hit-test in the globe's own unrotated-sphere space (gx/gy/rz — see
+   *  projectToScreen's own math) against every visible-face marker,
+   *  nearest wins. Shared by the click handler and pointer-move hover
+   *  detection so the two can never disagree about what's under the
+   *  cursor — before this they'd have been two separate copies of the
+   *  same math to keep in sync by hand. */
+  private findMarkerAtNDC(nx: number, ny: number): ValidatedMarker | null {
     let bestDist = Infinity;
     let bestMarker: ValidatedMarker | null = null;
 
@@ -484,7 +519,7 @@ export class SpillGlobe {
       const ry = gy * Math.cos(this.theta) - gz * Math.sin(this.theta);
       const rz = gy * Math.sin(this.theta) + gz * Math.cos(this.theta);
 
-      if (rz < 0) continue;
+      if (rz < 0) continue; // behind the globe, not visible
 
       const px = gx;
       const py = -ry;
@@ -496,8 +531,20 @@ export class SpillGlobe {
       }
     }
 
-    if (bestMarker && bestDist < 0.15) {
-      const newId = bestMarker.spillId === this.selectedRunId ? null : bestMarker.spillId;
+    return bestMarker && bestDist < 0.15 ? bestMarker : null;
+  }
+
+  private markerAtClientPoint(clientX: number, clientY: number): ValidatedMarker | null {
+    const rect = this.canvas.getBoundingClientRect();
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = ((clientY - rect.top) / rect.height) * 2 - 1;
+    return this.findMarkerAtNDC(nx, ny);
+  }
+
+  private handleClick(e: PointerEvent): void {
+    const marker = this.markerAtClientPoint(e.clientX, e.clientY);
+    if (marker) {
+      const newId = marker.spillId === this.selectedRunId ? null : marker.spillId;
       this.onSelectSpill(newId);
     }
   }
@@ -537,7 +584,7 @@ export class SpillGlobe {
         this.overlayCtx, this.markers,
         this.phi, this.theta,
         this.width, this.height,
-        this.selectedRunId, now,
+        this.selectedRunId, this.hoveredRunId, now,
       );
 
       this.animFrame = requestAnimationFrame(animate);
@@ -555,6 +602,7 @@ export class SpillGlobe {
     this.resizeObserver = null;
     this._cleanupPointer?.();
     this._cleanupPointer = null;
+    this.hoveredRunId = null;
     this.globe?.destroy();
     this.globe = null;
     this.overlayCtx.clearRect(0, 0, this.width, this.height);

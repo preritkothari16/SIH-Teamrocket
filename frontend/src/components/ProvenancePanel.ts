@@ -1,4 +1,5 @@
 import type { PipelineRun, Provenance } from '../types/schema';
+import { fieldRow } from '../utils/fieldRow';
 
 const SAR_SOURCE_LABELS: Record<string, string> = {
   cdse: 'Copernicus Data Space (CDSE)',
@@ -37,12 +38,7 @@ export class ProvenancePanel {
           <span class="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Data Provenance</span>
         </div>
         <div class="p-3 space-y-1.5">
-          ${rows.map(([k, v]) => `
-            <div class="flex items-center justify-between gap-3 py-1">
-              <span class="text-[10px] text-zinc-500 uppercase tracking-wider">${k}</span>
-              <span class="text-xs text-zinc-300 font-mono text-right truncate max-w-[65%]" title="${v}">${v}</span>
-            </div>
-          `).join('')}
+          ${rows.map(([k, v]) => fieldRow(k, v, { truncateValue: true })).join('')}
         </div>
       </div>
     `;
