@@ -7,6 +7,7 @@ cheap to check: class weighting, the loss, and the IoU metrics.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Tuple
 
@@ -34,8 +35,11 @@ from src.detection.train import (
     DiceCrossEntropyLoss,
     build_loss,
     confusion_matrix,
+    dice_from_iou,
     pairwise_confusion,
     per_class_iou,
+    per_class_precision,
+    per_class_recall,
 )
 
 SIZE = 32
@@ -367,6 +371,42 @@ def test_iou_penalises_calling_oil_a_look_alike() -> None:
     assert iou[LOOK_ALIKE_CLASS] == 0.0
 
 
+def test_precision_and_recall_on_a_symmetric_confusion() -> None:
+    """Same matrix as test_pairwise_confusion_reports_both_directions:
+    oil<->look-alike are mistaken for each other exactly half the time each
+    way, so both precision and recall come out 0.5 for both classes."""
+    target = torch.tensor([[OIL_CLASS, OIL_CLASS, LOOK_ALIKE_CLASS, LOOK_ALIKE_CLASS]])
+    prediction = torch.tensor([[OIL_CLASS, LOOK_ALIKE_CLASS, LOOK_ALIKE_CLASS, OIL_CLASS]])
+    matrix = confusion_matrix(prediction, target, 5)
+
+    precision = per_class_precision(matrix)
+    recall = per_class_recall(matrix)
+    assert precision[OIL_CLASS] == pytest.approx(0.5)
+    assert precision[LOOK_ALIKE_CLASS] == pytest.approx(0.5)
+    assert recall[OIL_CLASS] == pytest.approx(0.5)
+    assert recall[LOOK_ALIKE_CLASS] == pytest.approx(0.5)
+
+
+def test_precision_and_recall_are_nan_for_a_class_absent_from_both() -> None:
+    target = torch.tensor([[[0, 1], [2, 3]]])
+    matrix = confusion_matrix(target, target, 5)  # perfect prediction; class 4 absent
+    precision = per_class_precision(matrix)
+    recall = per_class_recall(matrix)
+    assert precision[:4] == pytest.approx([1.0, 1.0, 1.0, 1.0])
+    assert recall[:4] == pytest.approx([1.0, 1.0, 1.0, 1.0])
+    assert np.isnan(precision[4])
+    assert np.isnan(recall[4])
+
+
+def test_dice_from_iou_matches_the_algebraic_identity() -> None:
+    iou = np.array([0.0, 0.5, 1.0, np.nan])
+    dice = dice_from_iou(iou)
+    assert dice[0] == pytest.approx(0.0)
+    assert dice[1] == pytest.approx(2 * 0.5 / 1.5)
+    assert dice[2] == pytest.approx(1.0)
+    assert np.isnan(dice[3])
+
+
 def test_pairwise_confusion_reports_both_directions() -> None:
     target = torch.tensor([[OIL_CLASS, OIL_CLASS, LOOK_ALIKE_CLASS, LOOK_ALIKE_CLASS]])
     prediction = torch.tensor([[OIL_CLASS, LOOK_ALIKE_CLASS, LOOK_ALIKE_CLASS, OIL_CLASS]])
@@ -478,6 +518,22 @@ def test_training_smoke_run(tmp_path: Path) -> None:
     assert (models_dir / "best.pt").is_file()
     assert (models_dir / "last.pt").is_file()
     assert (models_dir / "training_history.json").is_file()
+
+    # Step 8.3: best_metrics.json is written alongside best.pt, from the
+    # same confusion matrix - no second evaluation pass.
+    history_entry = summary["history"][0]
+    assert set(("precision", "recall", "dice")) <= history_entry.keys()
+
+    metrics_path = models_dir / "best_metrics.json"
+    assert metrics_path.is_file()
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    assert metrics["architecture"]["arch"] == "unet"
+    assert metrics["train_samples"] == summary["train_samples"]
+    assert metrics["val_samples"] == summary["val_samples"]
+    for key in ("mean_iou", "oil_iou", "look_alike_iou", "precision", "recall",
+                "dice", "oil_as_lookalike_rate", "lookalike_as_oil_rate"):
+        assert key in metrics
+    assert isinstance(metrics["trained_at"], str) and metrics["trained_at"]
 
 
 def test_checkpoint_round_trips(tmp_path: Path) -> None:

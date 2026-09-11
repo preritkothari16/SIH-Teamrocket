@@ -3,8 +3,9 @@ import { RunList } from './components/RunList';
 import { SpillOverlay } from './components/SpillOverlay';
 import { ProvenancePanel } from './components/ProvenancePanel';
 import { RegionChips } from './components/RegionChips';
+import { ModelInfoPanel } from './components/ModelInfoPanel';
 import { VesselDrawer } from './components/VesselDrawer';
-import { listRuns, listRegions, getRun, getReport } from './api/client';
+import { listRuns, listRegions, getModelInfo, getRun, getReport } from './api/client';
 import type { PipelineRun, Region } from './types/schema';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -15,6 +16,9 @@ export class App {
   private spillOverlay: SpillOverlay;
   private provenancePanel: ProvenancePanel;
   private regionChips: RegionChips;
+  private modelInfoPanel: ModelInfoPanel;
+  private modelInfoToggle: HTMLElement;
+  private modelInfoPanelEl: HTMLElement;
   private vesselDrawer: VesselDrawer;
   private allRuns: PipelineRun[] = [];
   private regions: Region[] = [];
@@ -35,6 +39,8 @@ export class App {
     const provenanceEl = document.getElementById('provenance-panel')!;
     const regionChipsEl = document.getElementById('region-chips')!;
     const drawerEl = document.getElementById('vessel-drawer')!;
+    this.modelInfoPanelEl = document.getElementById('model-info-panel')!;
+    this.modelInfoToggle = document.getElementById('model-info-toggle')!;
 
     this.runListPanel = document.getElementById('run-list-panel')!;
     this.runListToggle = document.getElementById('run-list-toggle')!;
@@ -56,6 +62,7 @@ export class App {
     this.regionChips = new RegionChips(regionChipsEl, (regionId) => {
       void this.onRegionSelected(regionId);
     });
+    this.modelInfoPanel = new ModelInfoPanel(this.modelInfoPanelEl);
     this.vesselDrawer = new VesselDrawer(drawerEl);
 
     this.init();
@@ -68,7 +75,9 @@ export class App {
     this.setupRefreshButton();
     this.setupErrorButtons();
     this.setupReportButton();
+    this.setupModelInfoToggle();
     void this.loadRegions();
+    void this.loadModelInfo();
     await this.loadAllRuns();
   }
 
@@ -81,6 +90,23 @@ export class App {
       this.regions = [];
     }
     this.regionChips.render(this.regions, this.selectedRegionId);
+  }
+
+  private async loadModelInfo(): Promise<void> {
+    try {
+      const info = await getModelInfo();
+      this.modelInfoPanel.render(info);
+    } catch (err) {
+      // Non-fatal: the toggle just opens onto a loading state forever,
+      // which is honest given the request itself failed.
+      console.warn('[App] failed to load model info:', err);
+    }
+  }
+
+  private setupModelInfoToggle(): void {
+    this.modelInfoToggle.addEventListener('click', () => {
+      this.modelInfoPanelEl.classList.toggle('translate-x-full');
+    });
   }
 
   private async onRegionSelected(regionId: string | null): Promise<void> {
@@ -256,6 +282,7 @@ export class App {
     this.spillOverlay.destroy();
     this.provenancePanel.destroy();
     this.regionChips.destroy();
+    this.modelInfoPanel.destroy();
     this.vesselDrawer.destroy();
   }
 }

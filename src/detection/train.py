@@ -23,6 +23,10 @@ Run it::
     python -m src.detection.train --smoke-test
 
 Checkpoints go to ``models/``: ``best.pt`` (highest oil IoU) and ``last.pt``.
+Every time ``best.pt`` is (re)written, ``models/best_metrics.json`` is too -
+a small model-card summary (architecture, sample counts, headline oil-class
+precision/recall/dice/IoU, oil<->look-alike confusion rates) for
+``GET /api/model/info`` (step 8.3) to serve without loading a checkpoint.
 """
 
 from __future__ import annotations
@@ -34,6 +38,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -79,6 +84,39 @@ def per_class_iou(matrix: np.ndarray) -> np.ndarray:
     union = matrix.sum(axis=1) + matrix.sum(axis=0) - intersection
     with np.errstate(invalid="ignore", divide="ignore"):
         return np.where(union > 0, intersection / union, np.nan)
+
+
+def per_class_precision(matrix: np.ndarray) -> np.ndarray:
+    """Precision per class: TP / (TP + FP) - of everything *predicted* as
+    this class, how much actually was it. NaN when the class was never
+    predicted at all (rows are truth, columns are predictions - see
+    :func:`confusion_matrix` - so this is TP over each column's sum)."""
+    tp = np.diag(matrix).astype(np.float64)
+    predicted = matrix.sum(axis=0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(predicted > 0, tp / predicted, np.nan)
+
+
+def per_class_recall(matrix: np.ndarray) -> np.ndarray:
+    """Recall per class: TP / (TP + FN) - of everything *truly* this class,
+    how much the model caught (TP over each row's sum). NaN when the class
+    never appears in the ground truth."""
+    tp = np.diag(matrix).astype(np.float64)
+    actual = matrix.sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(actual > 0, tp / actual, np.nan)
+
+
+def dice_from_iou(iou: np.ndarray) -> np.ndarray:
+    """Dice from IoU already computed: ``2*iou / (1+iou)``.
+
+    A plain algebraic identity (both measure the same intersection/union;
+    with U = TP+FP+FN, IoU = TP/U and Dice = 2TP/(TP+U) = 2*IoU/(IoU+1)) -
+    not an approximation, so this needs no second pass over predictions.
+    NaN propagates through exactly where IoU was already NaN (class absent
+    from both truth and prediction).
+    """
+    return 2.0 * iou / (1.0 + iou)
 
 
 def pairwise_confusion(
@@ -157,20 +195,48 @@ def build_loss(
 # --------------------------------------------------------------------------- #
 @dataclass
 class EpochResult:
-    """Everything one validation pass produced."""
+    """Everything one validation pass produced.
+
+    ``precision``/``recall`` are computed here, off the same confusion
+    matrix ``iou`` already came from - see :func:`per_class_precision`/
+    :func:`per_class_recall`. ``dice`` is not stored: it is a pure function
+    of ``iou`` (:func:`dice_from_iou`), so it is a property instead of a
+    third array that could drift out of sync with it.
+    """
 
     loss: float
     iou: np.ndarray
     matrix: np.ndarray
+    precision: np.ndarray = field(default_factory=lambda: np.array([]))
+    recall: np.ndarray = field(default_factory=lambda: np.array([]))
     class_names: Sequence[str] = field(default_factory=lambda: list(CLASS_NAMES))
 
     @property
     def mean_iou(self) -> float:
         return float(np.nanmean(self.iou)) if self.iou.size else float("nan")
 
+    @property
+    def dice(self) -> np.ndarray:
+        return dice_from_iou(self.iou)
+
     def named_iou(self) -> Dict[str, float]:
         return {
             name: float(value) for name, value in zip(self.class_names, self.iou)
+        }
+
+    def named_precision(self) -> Dict[str, float]:
+        return {
+            name: float(value) for name, value in zip(self.class_names, self.precision)
+        }
+
+    def named_recall(self) -> Dict[str, float]:
+        return {
+            name: float(value) for name, value in zip(self.class_names, self.recall)
+        }
+
+    def named_dice(self) -> Dict[str, float]:
+        return {
+            name: float(value) for name, value in zip(self.class_names, self.dice)
         }
 
 
@@ -238,8 +304,58 @@ def validate(
         loss=total / max(batches, 1),
         iou=per_class_iou(matrix),
         matrix=matrix,
+        precision=per_class_precision(matrix),
+        recall=per_class_recall(matrix),
         class_names=list(class_names)[:num_classes],
     )
+
+
+def _best_metrics_payload(
+    model_spec: Dict[str, Any],
+    train_ds: "MKLabOilSpillDataset",
+    val_ds: "MKLabOilSpillDataset",
+    result: EpochResult,
+    class_names: Sequence[str],
+) -> Dict[str, Any]:
+    """Step 8.3's model card - the frontend's ``GET /api/model/info``
+    payload - built from the SAME confusion matrix :func:`validate` already
+    produced for this (the new-best) epoch. No second evaluation pass.
+
+    ``precision``/``recall``/``dice`` are the **oil class's own** values,
+    not a per-class average - this file exists to answer "is the model
+    good at the one class that matters", the same lens
+    :func:`report_validation`'s own "the number that matters" block already
+    uses for IoU. The full per-class breakdown (all classes, every epoch)
+    still lives in ``training_history.json``'s ``history[i]`` entries - see
+    the ``history.append`` call above.
+
+    Deliberately two IoUs and two confusion rates, not one invented
+    "oil_vs_lookalike_iou" number - they are genuinely distinct quantities
+    (:func:`pairwise_confusion` measures misclassification rate, not IoU).
+    """
+    named_iou = result.named_iou()
+    oil_name = class_names[OIL_CLASS] if len(class_names) > OIL_CLASS else None
+    look_name = class_names[LOOK_ALIKE_CLASS] if len(class_names) > LOOK_ALIKE_CLASS else None
+
+    if len(class_names) > max(OIL_CLASS, LOOK_ALIKE_CLASS):
+        mix = pairwise_confusion(result.matrix, OIL_CLASS, LOOK_ALIKE_CLASS)
+    else:
+        mix = {"a_as_b_rate": float("nan"), "b_as_a_rate": float("nan")}
+
+    return {
+        "architecture": model_spec,
+        "train_samples": len(train_ds),
+        "val_samples": len(val_ds),
+        "mean_iou": result.mean_iou,
+        "oil_iou": named_iou.get(oil_name, float("nan")) if oil_name else float("nan"),
+        "look_alike_iou": named_iou.get(look_name, float("nan")) if look_name else float("nan"),
+        "precision": float(result.precision[OIL_CLASS]),
+        "recall": float(result.recall[OIL_CLASS]),
+        "dice": float(result.dice[OIL_CLASS]),
+        "oil_as_lookalike_rate": mix["a_as_b_rate"],
+        "lookalike_as_oil_rate": mix["b_as_a_rate"],
+        "trained_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def report_validation(result: EpochResult, epoch: int, epochs: int) -> None:
@@ -417,6 +533,9 @@ def train(
                 "val_loss": result.loss,
                 "mean_iou": result.mean_iou,
                 "iou": result.named_iou(),
+                "precision": result.named_precision(),
+                "recall": result.named_recall(),
+                "dice": result.named_dice(),
                 "seconds": round(time.time() - epoch_start, 1),
             }
         )
@@ -425,6 +544,13 @@ def train(
         if score > best_score:
             best_score, best_epoch = score, epoch
             save_checkpoint(out_dir / "best.pt", model, epoch, history[-1], model_spec)
+            (out_dir / "best_metrics.json").write_text(
+                json.dumps(
+                    _best_metrics_payload(model_spec, train_ds, val_ds, result, train_ds.class_names),
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
             print(f"  -> new best {cfg.checkpoint_metric} IoU {score:.4f}, checkpoint saved")
         elif epoch - best_epoch >= cfg.early_stopping_patience:
             print(
@@ -556,6 +682,9 @@ __all__ = [
     "build_loss",
     "confusion_matrix",
     "per_class_iou",
+    "per_class_precision",
+    "per_class_recall",
+    "dice_from_iou",
     "pairwise_confusion",
     "report_validation",
     "resolve_device",

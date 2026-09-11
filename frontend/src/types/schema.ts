@@ -70,6 +70,31 @@ export interface DriftHindcast {
   hindcast: HindcastEntry[]
 }
 
+export interface ModelArchitecture {
+  arch: string
+  encoder: string
+  in_channels: number
+  num_classes: number
+  class_names: string[]
+  image_size: number
+}
+
+export interface ModelInfo {
+  trained: boolean
+  architecture?: ModelArchitecture
+  train_samples?: number
+  val_samples?: number
+  mean_iou?: number
+  oil_iou?: number
+  look_alike_iou?: number
+  precision?: number
+  recall?: number
+  dice?: number
+  oil_as_lookalike_rate?: number
+  lookalike_as_oil_rate?: number
+  trained_at?: string
+}
+
 export interface Region {
   id: string
   label: string

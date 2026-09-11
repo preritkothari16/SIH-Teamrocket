@@ -1,4 +1,4 @@
-import type { Alert, PipelineRun, Region } from '../types/schema';
+import type { Alert, ModelInfo, PipelineRun, Region } from '../types/schema';
 
 // Empty string keeps requests relative, routed through vite.config.ts's dev
 // proxy to localhost:8000. Set VITE_API_BASE_URL (frontend/.env) to hit a
@@ -98,6 +98,16 @@ export async function listRegions(): Promise<Region[]> {
   if (!res.ok) throw new Error(`GET /api/regions failed: ${res.status} ${res.statusText}`);
   const data = await res.json();
   return validateRegions(data);
+}
+
+export async function getModelInfo(): Promise<ModelInfo> {
+  const res = await fetch(`${API_BASE}/api/model/info`);
+  if (!res.ok) throw new Error(`GET /api/model/info failed: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  if (typeof data !== 'object' || data === null || typeof data.trained !== 'boolean') {
+    throw new Error('Expected {trained: boolean, ...} from GET /api/model/info');
+  }
+  return data as ModelInfo;
 }
 
 export async function getRun(sceneId: string): Promise<PipelineRun> {

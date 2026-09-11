@@ -8,6 +8,7 @@ GET  /api/runs/{id}/report  — Step 5.3 report file (404 if not generated)
 POST /api/runs              — trigger detection on a scene (sync, hackathon)
 POST /api/runs/{id}/ask     — Step 8.1 natural-language Q&A over a run
 GET  /api/regions           — Step 8.4 demo region presets
+GET  /api/model/info        — Step 8.3 model card ({trained: false} if untrained)
 
 CORS is configured for the Vite dev server at http://localhost:5173.
 
@@ -18,6 +19,7 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 import sys
@@ -206,6 +208,31 @@ def api_ask_run(scene_id: str, request: AskRequest) -> AskResponse:
     except QAError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     return AskResponse(answer=result.answer, cited_vessels=result.cited_vessels)
+
+
+@app.get("/api/model/info")
+def api_model_info() -> Dict[str, Any]:
+    """Step 8.3 model card: ``src/detection/train.py``'s ``best_metrics.json``,
+    written alongside ``models/best.pt`` every time training beats its own
+    previous best.
+
+    Returns ``{"trained": false}`` — not a 404 or a 500 — when that file
+    doesn't exist, which is the current repo state (no checkpoint has been
+    trained here yet, per CLAUDE.md). A corrupt/unreadable file degrades the
+    same way rather than 500ing: "not trained" is the honest fallback either
+    way, not a server error.
+    """
+    settings = get_settings()
+    metrics_path = settings.paths.resolve(settings.paths.models_dir) / "best_metrics.json"
+    if not metrics_path.is_file():
+        return {"trained": False}
+    try:
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("unreadable %s: %s", metrics_path, exc)
+        return {"trained": False}
+    metrics["trained"] = True
+    return metrics
 
 
 @app.get("/api/health")

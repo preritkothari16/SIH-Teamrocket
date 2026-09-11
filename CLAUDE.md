@@ -39,6 +39,7 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 8.1 attribution Q&A | `src/attribution/qa.py`, `src/api/main.py` | **done, never called with a real key** — grounds an LLM answer in a run's existing scores/explanations, no new scoring; needs `ANTHROPIC_API_KEY`, unset here |
 | 8.2 data provenance | `scripts/run_pipeline.py`, `src/api/models.py`, `frontend/src/components/ProvenancePanel.ts` | **done** — `sar_source`/`sar_scene_id` come from data ingestion already carries; `wind_source`/`current_source` come from `get_wind()`/`get_current()`'s new `.source` field |
 | 8.4 demo regions | `configs/demo_regions.yaml`, `src/api/main.py`, `frontend/src/components/RegionChips.ts` | **done, real-scene verified** — 1 real region (`demo_pipeline`), 3 pending; header chip row, not a `<select>` |
+| 8.3 model card | `src/detection/train.py`, `src/api/main.py`, `frontend/src/components/ModelInfoPanel.ts` | **done, correctly reports untrained** — `models/best_metrics.json` written alongside `best.pt`; API/frontend both verified against the real (empty) `models/` and a synthetic trained payload |
 
 `pytest` → 496 passing, ~55-60s, fully offline. Run it before believing anything here.
 
@@ -251,6 +252,43 @@ done last, one step at a time — same working agreement as every other phase.
   blanked for the duration of that one manual check and restored byte-exact
   immediately after — pytest's own `spills_dir` fixture already does the
   same `delenv` for exactly this reason.)
+
+- **8.3 model card** (`src/detection/train.py`, `GET /api/model/info` in
+  `src/api/main.py`, `frontend/src/components/ModelInfoPanel.ts`):
+  `validate()` already accumulated a confusion matrix and computed
+  `per_class_iou()`/`pairwise_confusion()` from it before this step - it now
+  also computes `per_class_precision()`/`per_class_recall()` off that same
+  matrix (`TP/predicted_total`, `TP/true_total` - standard, no second
+  eval pass), and `EpochResult.dice` is a `@property` (`2*iou/(1+iou)`,
+  `dice_from_iou()`) rather than a fourth stored array, so it can't drift
+  out of sync with `iou`. All three now ride along in every
+  `history.append({...})` entry (per-class dicts, like `iou` already did).
+  Every time `best.pt` is (re)written, `models/best_metrics.json` is too
+  (`_best_metrics_payload()`) - `architecture` (the existing `model_spec`
+  dict), `train_samples`/`val_samples` (reusing `len(train_ds)`/
+  `len(val_ds)` - **tile counts**, not distinct scenes - see
+  `MKLabOilSpillDataset.__len__`), `mean_iou`, `oil_iou`, `look_alike_iou`,
+  and - deliberately the **oil class's own** values, not a per-class
+  average, since this file exists to answer "is the model good at the one
+  class that matters" - `precision`, `recall`, `dice`. Kept as two IoUs
+  plus two confusion rates (`oil_as_lookalike_rate`/`lookalike_as_oil_rate`
+  from the same `pairwise_confusion()` already computed), not one invented
+  "oil_vs_lookalike_iou" number - they're genuinely distinct quantities.
+  `GET /api/model/info` returns `{"trained": false}` - never a 404/500 -
+  when that file doesn't exist (this repo's actual state) or fails to
+  parse. Frontend: this app has no tab system (one page: header + sidebar +
+  globe + spill-overlay + vessel-drawer), so `ModelInfoPanel.ts` is a
+  right-side slide-in (`#model-info-panel`, `translate-x-full` toggled by a
+  new `#model-info-toggle` header button) rather than another tab - same
+  `constructor`/`render`/`destroy` shape as every other panel here, and its
+  untrained-state render is a plain "model not yet trained" message, not an
+  error or blank space. **Verified against the real, current, untrained
+  repo state** (`{"trained": false}`, panel showing the untrained message,
+  zero console errors) and, separately, against a synthetic trained
+  `best_metrics.json` dropped into (gitignored) `models/` for one manual
+  check and removed immediately after, to confirm the populated layout
+  actually renders - both via a live `uvicorn` + `npm run dev` pair driven
+  with Playwright.
 
 ## Environment facts
 
