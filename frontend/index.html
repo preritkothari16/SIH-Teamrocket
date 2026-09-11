@@ -42,10 +42,7 @@
 <button id="run-list-toggle" class="hidden text-xs p-2 sm:px-3 sm:py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
           </button>
-          <button id="theme-toggle" class="text-xs p-2 sm:px-3 sm:py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" aria-label="Toggle dark/light theme" title="Toggle dark/light theme">
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-          </button>
-          <button id="reduce-motion-toggle" class="hidden sm:inline-flex text-xs px-3 py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" aria-label="Toggle reduce motion" title="Toggle reduce motion">
+          <button id="reduce-motion-toggle" class="text-xs p-2 sm:px-3 sm:py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" aria-label="Toggle reduce motion" title="Toggle reduce motion">
             <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4l10 8-10 8l1-2h-2l-10-8 10-8l1 2h2l-10 8-1-2h2L12 2z"/><path d="M12 22l-4-4 1.415-1.415L12 18l6-6-1.415-1.415L12 14l-6 6z"/></svg>
           </button>
           <button id="model-info-toggle" class="hidden sm:inline-flex text-xs px-3 py-1.5 rounded-lg bg-zinc-800/80 backdrop-blur border border-zinc-700/50 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all duration-200" aria-label="Toggle model info" title="Model info (Step 8.3)">
@@ -202,21 +199,6 @@
 
     <script type="module">
 (function () {
-  // Theme toggle: dark / light / system via localStorage
-  const html = document.documentElement;
-  const savedTheme = localStorage.getItem('data-theme');
-  let currentTheme = savedTheme || 'dark';
-  html.dataset.theme = currentTheme;
-
-  const themeToggle = document.getElementById('theme-toggle');
-  themeToggle.addEventListener('click', () => {
-    if (currentTheme === 'dark') currentTheme = 'light';
-    else if (currentTheme === 'light') currentTheme = 'system';
-    else currentTheme = 'dark';
-    html.dataset.theme = currentTheme;
-    localStorage.setItem('data-theme', currentTheme);
-  });
-
   // Reduce motion toggle: overrides auto preference, respects reduced-motion media query
   const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const savedReduced = localStorage.getItem('data-reduced-motion');
