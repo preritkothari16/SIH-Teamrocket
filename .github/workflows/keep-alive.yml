@@ -27,4 +27,11 @@ jobs:
     steps:
       - name: Ping /api/health
         run: |
-          curl -fsS --max-time 30 https://sar-oilspill-api.onrender.com/api/health
+          # 30s wasn't enough for this workflow's own first-ever ping — it
+          # hit a genuinely cold Render instance and the run failed rather
+          # than waiting it out (confirmed: run 34634745181, "failed" status,
+          # exactly the request-actually-reached-the-server-but-timed-out
+          # case). 75s covers a real cold start (documented 30-60s) with
+          # margin, and this job costs nothing extra by taking longer only
+          # on the rare cold call.
+          curl -fsS --max-time 75 https://sar-oilspill-api.onrender.com/api/health
