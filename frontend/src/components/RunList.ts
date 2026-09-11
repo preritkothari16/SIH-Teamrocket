@@ -1,4 +1,5 @@
 import type { PipelineRun } from '../types/schema';
+import { escapeHtml } from '../utils/escape';
 
 const STATUS_COLORS: Record<string, string> = {
   new: 'bg-red-500',
@@ -86,14 +87,14 @@ export class RunList {
       const confBarColor = conf >= 0.8 ? 'bg-emerald-400' : conf >= 0.5 ? 'bg-amber-400' : 'bg-red-400';
 
       return `
-        <button class="run-item w-full text-left px-4 py-3.5 border-b border-zinc-800/30 hover:bg-zinc-800/40 transition-all duration-200 group card-hover ${isSelected ? 'bg-zinc-800/60 border-l-2 border-l-blue-500' : ''}" data-run-id="${id}" data-index="${i}">
+        <button class="run-item w-full text-left px-4 py-3.5 border-b border-zinc-800/30 hover:bg-zinc-800/40 transition-all duration-200 group card-hover ${isSelected ? 'bg-zinc-800/60 border-l-2 border-l-blue-500' : ''}" data-run-id="${escapeHtml(id)}" data-index="${i}">
           <div class="flex items-start gap-3">
             <div class="mt-1 relative">
               <div class="w-3.5 h-3.5 rounded-full ${color} shadow-lg ${glow} shrink-0 ${status === 'new' ? 'glow-pulse' : ''}"></div>
             </div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center justify-between gap-2 mb-1.5">
-                <span class="text-sm font-semibold text-zinc-100 truncate group-hover:text-white">${id}</span>
+                <span class="text-sm font-semibold text-zinc-100 truncate group-hover:text-white">${escapeHtml(id)}</span>
                 <span class="text-[10px] px-2 py-0.5 rounded-full border font-semibold ${bgColor} ${textColor} shrink-0">${label}</span>
               </div>
               <div class="flex items-center gap-3 mb-2">

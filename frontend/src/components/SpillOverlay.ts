@@ -1,4 +1,5 @@
 import type { PipelineRun } from '../types/schema';
+import { escapeHtml } from '../utils/escape';
 
 const STATUS_STYLES: Record<string, string> = {
   new: 'bg-red-900/50 text-red-300 border-red-700/60 shadow-red-900/30',
@@ -60,7 +61,7 @@ export class SpillOverlay {
               ${statusLabel}
             </span>
           </div>
-          <span class="text-[10px] text-zinc-500 font-mono">${spill.scene_id}</span>
+          <span class="text-[10px] text-zinc-500 font-mono">${escapeHtml(spill.scene_id)}</span>
         </div>
 
         <div class="p-4 space-y-4">
@@ -121,7 +122,7 @@ export class SpillOverlay {
             <div>
               <div class="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">Alert Rules</div>
               <div class="flex flex-wrap gap-1.5">
-                ${rules.map((r) => `<span class="rule-tag rule-failed">${r}</span>`).join('')}
+                ${rules.map((r) => `<span class="rule-tag rule-failed">${escapeHtml(r)}</span>`).join('')}
               </div>
             </div>
           ` : `

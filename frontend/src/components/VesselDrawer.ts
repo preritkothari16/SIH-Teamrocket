@@ -1,4 +1,5 @@
 import type { Vessel } from '../types/schema';
+import { escapeHtml } from '../utils/escape';
 
 export class VesselDrawer {
   private drawer: HTMLElement;
@@ -35,14 +36,14 @@ export class VesselDrawer {
             <!-- Vessel Info -->
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 mb-1">
-                <span class="text-sm font-semibold text-zinc-100 truncate">${vessel.name || vessel.mmsi}</span>
+                <span class="text-sm font-semibold text-zinc-100 truncate">${escapeHtml(vessel.name || vessel.mmsi)}</span>
                 ${isTop ? '<span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-bold uppercase">Top</span>' : ''}
               </div>
 
               <!-- MMSI + Type -->
               <div class="flex items-center gap-2 mb-2">
-                <span class="text-[10px] text-zinc-500 font-mono">${vessel.mmsi}</span>
-                <span class="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50 capitalize">${vessel.vessel_type}</span>
+                <span class="text-[10px] text-zinc-500 font-mono">${escapeHtml(vessel.mmsi)}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/50 capitalize">${escapeHtml(vessel.vessel_type)}</span>
               </div>
 
               <!-- Score Bar -->
@@ -69,7 +70,7 @@ export class VesselDrawer {
 
               <!-- Explanation -->
               <div class="text-[11px] text-zinc-500 leading-relaxed">
-                ${vessel.explanation}
+                ${escapeHtml(vessel.explanation)}
               </div>
             </div>
           </div>
