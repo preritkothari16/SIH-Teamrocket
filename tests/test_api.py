@@ -413,14 +413,21 @@ class TestGetRunEndpoint:
 
 
 class TestGetReportEndpoint:
-    def test_404_when_no_report(self, populated_spills: Path) -> None:
+    def test_regenerates_a_report_when_no_file_exists(self, populated_spills: Path) -> None:
+        """No report.html on disk, but populated_spills gives GET /api/runs/:id
+        real spill data via the Phase-1 geojson path - the endpoint should
+        build one on the fly rather than 404, so a stateless deploy (no
+        local disk to have ever written report.html on) still works."""
         resp = client.get(f"/api/runs/{SCENE_ID}/report")
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/html")
+        assert SCENE_ID.encode() in resp.content
 
     def test_returns_report_when_exists(self, populated_spills: Path) -> None:
         # run_pipeline.py --report's default output: report.html next to
         # pipeline_result.json — NOT pipeline_result.json itself (that's the
-        # raw combined JSON, already served by GET /api/runs/:id).
+        # raw combined JSON, already served by GET /api/runs/:id). A local
+        # file, when present, wins over regenerating one.
         scene_dir = populated_spills.parent / SCENE_ID
         scene_dir.mkdir(parents=True, exist_ok=True)
         report_path = scene_dir / "report.html"
@@ -432,6 +439,11 @@ class TestGetReportEndpoint:
         assert b"test report" in resp.content
 
     def test_does_not_serve_pipeline_result_as_report(self, populated_spills: Path) -> None:
+        # A spills-less pipeline_result.json takes priority over the good
+        # geojson fallback (get_run()'s own, pre-existing priority order) -
+        # regeneration then has no real geometry to build a map from, so
+        # this degrades to 404, never to serving the raw JSON as if it were
+        # the report.
         scene_dir = populated_spills.parent / SCENE_ID
         scene_dir.mkdir(parents=True, exist_ok=True)
         (scene_dir / "pipeline_result.json").write_text(
@@ -440,6 +452,76 @@ class TestGetReportEndpoint:
 
         resp = client.get(f"/api/runs/{SCENE_ID}/report")
         assert resp.status_code == 404
+        assert b'"scene_id"' not in resp.content
+
+    def test_404_when_no_data_exists_anywhere(self, spills_dir: Path) -> None:
+        resp = client.get("/api/runs/no-such-scene-at-all/report")
+        assert resp.status_code == 404
+
+
+class TestContractToPipelineResult:
+    """contract_to_pipeline_result() is what lets the report endpoint
+    regenerate from a Postgres-backed contract - that table never has a
+    report.html file, or vessels/drift, sitting anywhere. Exercised here
+    directly (no live DB needed) against exactly the shape
+    src/api/registry.py::_get_run_postgres() produces."""
+
+    POSTGRES_SHAPED_CONTRACT: Dict[str, Any] = {
+        "spill": {
+            "scene_id": "postgres_scene",
+            "acquisition_timestamp": "2024-04-10T14:20:00+00:00",
+            "confidence": 0.9,
+            "area_km2": 5.0,
+            "centroid": {"lat": 24.1, "lon": -90.0},
+            "bbox": {"minLon": -90.5, "minLat": 23.5, "maxLon": -89.5, "maxLat": 24.5},
+            "polygon": {
+                "type": "Polygon",
+                "coordinates": [[[-90.2, 23.8], [-89.7, 24.2], [-89.3, 24.0], [-89.8, 23.5], [-90.2, 23.8]]],
+            },
+            "major_axis_bearing": 45.0,
+            "elongation": 2.0,
+        },
+        "alert": {
+            "spill_id": "evt_test",
+            "status": "new",
+            "rules_fired": ["wind"],
+            "first_seen": "2024-04-10T14:20:00+00:00",
+            "last_updated": "2024-04-10T14:25:00+00:00",
+        },
+        # Never populated for a Postgres-backed run — see src/api/registry.py's
+        # own module docstring on why.
+        "vessels": [],
+        "drift": {"forecast": [], "hindcast": []},
+    }
+
+    def test_produces_a_buildable_report_from_a_postgres_shaped_contract(self) -> None:
+        from src.api.registry import contract_to_pipeline_result
+        from src.output.report import build_report_html
+
+        result = contract_to_pipeline_result(self.POSTGRES_SHAPED_CONTRACT, "postgres_scene")
+        html = build_report_html(result)
+
+        assert "postgres_scene" in html
+        assert "<html" in html.lower()
+        assert "wind" in html  # the surviving failed-rule name
+
+    def test_regenerated_report_is_served_end_to_end(
+        self, spills_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same contract, driven through the real endpoint with get_run()
+        mocked to return it — stands in for a Postgres-backed run without
+        needing a live database connection in this test."""
+        from src.api import main as main_mod
+
+        monkeypatch.setattr(
+            main_mod, "get_run",
+            lambda scene_id: dict(self.POSTGRES_SHAPED_CONTRACT) if scene_id == "postgres_scene" else None,
+        )
+
+        resp = client.get("/api/runs/postgres_scene/report")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/html")
+        assert b"postgres_scene" in resp.content
 
 
 class TestTriggerRunEndpoint:

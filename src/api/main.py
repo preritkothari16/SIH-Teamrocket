@@ -4,7 +4,7 @@ Endpoints
 ---------
 GET  /api/runs              — list all processed runs (summary)
 GET  /api/runs/{id}         — full PipelineRun contract for one scene
-GET  /api/runs/{id}/report  — Step 5.3 report file (404 if not generated)
+GET  /api/runs/{id}/report  — Step 5.3 report; regenerated on request if no local file exists
 POST /api/runs              — trigger detection on a scene (sync, hackathon)
 POST /api/runs/{id}/ask     — Step 8.1 natural-language Q&A over a run
 GET  /api/regions           — Step 8.4 demo region presets
@@ -29,14 +29,15 @@ from typing import Any, Dict, List, Optional
 import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from src.api.models import (
     AskRequest, AskResponse, PipelineRun, Region, RunRequest, RunSummary,
 )
-from src.api.registry import get_report_path, get_run, list_runs
+from src.api.registry import contract_to_pipeline_result, get_report_path, get_run, list_runs
 from src.attribution.qa import QAError, answer_question
 from src.config import Settings, get_settings
+from src.output.report import build_report_html
 
 logger = logging.getLogger(__name__)
 
@@ -123,18 +124,40 @@ def api_get_run(scene_id: str) -> PipelineRun:
 
 @app.get("/api/runs/{scene_id}/report")
 def api_get_report(scene_id: str):
-    """Return the Step 5.3 standalone HTML incident report, 404 otherwise."""
-    report = get_report_path(scene_id)
-    if report is None:
+    """Serve the Step 5.3 standalone HTML incident report.
+
+    A local file (``run_pipeline.py --report``'s own output) wins when one
+    exists - unchanged local-dev behaviour. Otherwise the report is
+    regenerated on request from whatever ``get_run()`` itself has - the
+    Postgres ``spills`` table included - since Render's filesystem is
+    ephemeral and never has that file to begin with. 404 only when neither
+    a file nor enough data to build one from exists.
+    """
+    report_path = get_report_path(scene_id)
+    if report_path is not None:
+        return FileResponse(
+            report_path,
+            media_type="text/html",
+            filename=f"{scene_id}_report.html",
+        )
+
+    run = get_run(scene_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run '{scene_id}' not found")
+    try:
+        result = contract_to_pipeline_result(run, scene_id)
+        html = build_report_html(result)
+    except Exception as exc:  # noqa: BLE001 - regeneration is best-effort;
+        # any failure (no real geometry to map, malformed contract, ...)
+        # means "not enough data for a report", not a server bug worth
+        # 500ing - same "unavailable is a fact, not an error" treatment
+        # this project already gives a missing wind/current reading.
+        logger.info("could not regenerate a report for %s: %s", scene_id, exc)
         raise HTTPException(
             status_code=404,
-            detail=f"No report for '{scene_id}' — run the pipeline with --report first",
+            detail=f"No report could be built for '{scene_id}'",
         )
-    return FileResponse(
-        report,
-        media_type="text/html",
-        filename=f"{scene_id}_report.html",
-    )
+    return HTMLResponse(content=html)
 
 
 @app.post("/api/runs", response_model=PipelineRun)

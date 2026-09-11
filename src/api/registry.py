@@ -536,3 +536,78 @@ def _bbox_to_object(bbox: list) -> Dict[str, float]:
 def data_get(d: dict, key: str, default: Any = None) -> Any:
     """Safe dict.get that works for nested access."""
     return d.get(key, default)
+
+
+# --------------------------------------------------------------------------- #
+# Report regeneration: PipelineRun contract -> run_pipeline.py "result" shape
+# --------------------------------------------------------------------------- #
+def contract_to_pipeline_result(contract: Dict[str, Any], scene_id: str) -> Dict[str, Any]:
+    """Adapt one ``get_run()``-shaped ``PipelineRun`` contract back into the
+    ``{scene_id, generated_at, spills: [...]}`` shape
+    ``src/output/report.py::build_report_html()`` (and the ``build_map()``
+    it calls) expect.
+
+    This is what lets ``GET /api/runs/{id}/report`` regenerate a report on
+    request instead of requiring ``scripts/run_pipeline.py --report``'s
+    original file to still be sitting on local disk - the only thing that
+    survives a stateless Render deploy is whatever ``get_run()`` itself can
+    already produce (the Postgres ``spills`` table included).
+
+    Lossy for a Postgres-backed contract, by that table's own design (see
+    this module's docstring): ``rules_fired`` there is only the *failed*
+    rule *names*, not each rule's own pass/fail reason string, and
+    ``vessels``/``drift`` are always empty - the regenerated report shows
+    exactly what the contract has, same as the dashboard/map already do.
+    """
+    spill = contract["spill"]
+    alert = contract["alert"]
+    vessels = contract.get("vessels") or []
+    drift = contract.get("drift") or {}
+
+    feature = {
+        "type": "Feature",
+        "geometry": spill.get("polygon"),
+        "properties": {
+            "spill_id": alert.get("spill_id") or scene_id,
+            "scene_id": spill.get("scene_id", scene_id),
+            "acquisition_timestamp": spill.get("acquisition_timestamp"),
+            "centroid_lon": (spill.get("centroid") or {}).get("lon"),
+            "centroid_lat": (spill.get("centroid") or {}).get("lat"),
+            "area_km2": spill.get("area_km2"),
+            "mean_confidence": spill.get("confidence"),
+            "elongation": spill.get("elongation"),
+            "orientation_deg": spill.get("major_axis_bearing"),
+        },
+    }
+    alert_out = {
+        "status": alert.get("status"),
+        # Each failed rule's own reason didn't survive into the contract -
+        # see this function's docstring - so only the name is known here.
+        "rules": [{"name": name, "passed": False, "reason": ""} for name in (alert.get("rules_fired") or [])],
+    }
+    vessels_out = [
+        {
+            "mmsi": v.get("mmsi"),
+            "vessel_name": v.get("name"),
+            "vessel_type": v.get("vessel_type"),
+            "score": v.get("score"),
+            "cpa_distance_km": v.get("cpa_distance_km"),
+            "explanation": v.get("explanation"),
+        }
+        for v in vessels
+    ]
+    forecast_out = [
+        {"hours_elapsed": f.get("hours"), "time": f.get("time")}
+        for f in (drift.get("forecast") or [])
+    ]
+
+    return {
+        "scene_id": scene_id,
+        "generated_at": alert.get("last_updated") or spill.get("acquisition_timestamp"),
+        "spills": [{
+            "spill": feature,
+            "alert": alert_out,
+            "vessels": vessels_out,
+            "drift_forecast": forecast_out,
+        }],
+    }

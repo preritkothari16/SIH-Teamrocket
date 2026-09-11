@@ -49,4 +49,10 @@ COPY scripts ./scripts
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 
-CMD ["python3", "-m", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form, not exec form: Render's Docker runtime injects $PORT and
+# expects the container to bind to it (it auto-detects the EXPOSEd port
+# only as a fallback when $PORT isn't set) - the exec-form CMD this
+# replaced hardcoded 8000, which only ever worked because that fallback
+# happened to match. ${PORT:-8000} keeps `docker run` with no PORT set
+# (local testing) working the same as before.
+CMD python3 -m uvicorn src.api.main:app --host 0.0.0.0 --port ${PORT:-8000}
