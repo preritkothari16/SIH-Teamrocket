@@ -90,17 +90,31 @@ class LocalSceneSource:
 
     # -- discovery -------------------------------------------------------- #
     def iter_products(self) -> Iterator[Path]:
-        """Every candidate product path under ``root``, sorted for determinism."""
+        """Every candidate product path under ``root``, sorted for determinism.
+
+        ``Path.glob("**/*")`` materialises the full recursive listing up
+        front, so yielding a ``.SAFE`` directory does not stop it from also
+        walking that directory's own contents - without the exclusion below,
+        every measurement TIFF inside an already-yielded ``.SAFE`` directory
+        would *also* be yielded as its own separate "product": a bare
+        single-polarisation raster with no CRS/manifest, read as a bogus
+        scene with a pixel-coordinate (not lat/lon) footprint. One real
+        product must stay one product.
+        """
         if not self.root.exists():
             logger.warning("local scene root does not exist: %s", self.root)
             return
 
         pattern = "**/*" if self.recursive else "*"
+        safe_dirs: List[Path] = []
         for entry in sorted(self.root.glob(pattern)):
             if entry.name.startswith("."):
                 continue
+            if any(entry.is_relative_to(safe_dir) for safe_dir in safe_dirs):
+                continue
             if entry.is_dir():
                 if entry.name.upper().endswith(SAFE_SUFFIX):
+                    safe_dirs.append(entry)
                     yield entry
                 continue
             suffix = entry.suffix.lower()

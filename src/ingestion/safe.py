@@ -1,7 +1,11 @@
 """Sentinel-1 SAFE-format ingestion.
 
-Reads VV+VH measurement TIFFs from a SAFE .zip archive (or .SAFE directory)
-using GDAL's ``/vsizip/`` virtual filesystem — no physical extraction needed.
+Reads VV+VH measurement TIFFs from either a SAFE .zip archive, via GDAL's
+``/vsizip/`` virtual filesystem (no physical extraction needed), or an
+already-extracted ``.SAFE`` directory (opened directly off disk) — e.g. a
+product someone unzipped by hand rather than one ``CDSECatalogue.fetch()``
+downloaded itself. Both paths converge on the same measurement-lookup and
+band-reading logic; only *how a member's bytes are opened* differs.
 
 Usage::
 
@@ -36,9 +40,16 @@ class SAFEError(RuntimeError):
     """A SAFE archive could not be read or is missing required data."""
 
 
+def _is_safe_dir(path: Path) -> bool:
+    return path.is_dir() and path.name.upper().endswith(".SAFE")
+
+
 def is_safe_archive(path: Path) -> bool:
-    """True if *path* is a .zip containing a Sentinel-1 SAFE structure."""
+    """True if *path* is a .zip or an extracted ``.SAFE`` directory
+    containing a Sentinel-1 SAFE measurement structure."""
     path = Path(path)
+    if _is_safe_dir(path):
+        return safe_measurement_members(path) is not None
     if path.suffix.lower() != ".zip":
         return False
     try:
@@ -52,21 +63,42 @@ def is_safe_archive(path: Path) -> bool:
 
 
 def safe_measurement_members(path: Path) -> Optional[Dict[str, str]]:
-    """Locate VV and VH measurement TIFFs inside a SAFE archive.
+    """Locate VV and VH measurement TIFFs inside a SAFE archive or directory.
 
-    Returns a dict ``{"VV": "<archive-relative-path>", "VH": "..."}`` or
-    ``None`` when the path is not a .zip or does not contain Sentinel-1
-    measurements.
+    Returns a dict ``{"VV": "<member-or-file-path>", "VH": "..."}`` or
+    ``None`` when the path is neither a .zip nor a ``.SAFE`` directory, or
+    does not contain Sentinel-1 measurements. For a directory, values are
+    real filesystem paths (as strings); for a .zip, archive-relative member
+    names — :func:`read_safe_bands` knows how to open each.
 
-    Raises :class:`SAFEError` when the archive is a valid ZIP but is missing
-    one of the two required polarisations.
+    Raises :class:`SAFEError` when the archive/directory is validly a SAFE
+    product but is missing one of the two required polarisations.
     """
     path = Path(path)
+
+    if _is_safe_dir(path):
+        measurement_dir = path / "measurement"
+        if not measurement_dir.is_dir():
+            return None
+        members: Dict[str, str] = {}
+        for member_path in measurement_dir.iterdir():
+            match = _SAFE_MEASUREMENT_RE.search(f"measurement/{member_path.name}")
+            if match:
+                members[match.group("polarisation").upper()] = str(member_path)
+        if not members:
+            return None
+        missing = {"VV", "VH"} - members.keys()
+        if missing:
+            raise SAFEError(
+                f"SAFE directory {path} is missing measurement TIFF(s): {', '.join(sorted(missing))}"
+            )
+        return members
+
     if path.suffix.lower() != ".zip":
         return None
     try:
         with zipfile.ZipFile(path) as archive:
-            members: Dict[str, str] = {}
+            members = {}
             for name in archive.namelist():
                 match = _SAFE_MEASUREMENT_RE.search(name)
                 if match:
@@ -125,12 +157,19 @@ def read_safe_bands(
     if members is None:
         raise SAFEError(f"{path} does not appear to be a Sentinel-1 SAFE archive")
 
+    is_dir = _is_safe_dir(path)
     rasters: List[np.ndarray] = []
     reference: Optional[Tuple[Tuple[int, int, Affine, Optional[CRS]], Optional[float], Any]] = None
 
     for polarisation in ("VV", "VH"):
-        vsi_path = f"/vsizip/{path.resolve().as_posix()}/{members[polarisation]}"
-        with rasterio.open(vsi_path) as dataset:
+        # A directory's member is already a real file path; a .zip member
+        # is opened in place through GDAL's virtual filesystem instead of
+        # extracting it to disk first.
+        member_path = (
+            members[polarisation] if is_dir
+            else f"/vsizip/{path.resolve().as_posix()}/{members[polarisation]}"
+        )
+        with rasterio.open(member_path) as dataset:
             grid = (dataset.width, dataset.height, dataset.transform, dataset.crs)
             if reference is None:
                 reference = grid, dataset.nodata, dataset.get_gcps()
