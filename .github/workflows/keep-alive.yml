@@ -1,0 +1,30 @@
+name: Keep backend awake
+
+# Render's free plan sleeps the API after ~15 min with no traffic; the next
+# visitor then waits 30-60s for it to wake up, which reads as "broken" even
+# though nothing's wrong. This pings /api/health every 10 minutes so Render
+# never sees it go idle. See the audit report for the full writeup.
+#
+# GitHub only runs scheduled workflows on the default branch, and a schedule
+# can slip by several minutes under GitHub's own load (documented, not a bug
+# here) — 10 min leaves comfortable margin under the 15 min sleep window. If
+# a gap is ever a problem (e.g. GitHub Actions itself has an outage), a free
+# external monitor (uptimerobot.com) pinging the same URL is the fallback —
+# not set up here since it needs a manually-created account.
+#
+# GitHub also disables a repo's scheduled workflows after 60 days with no
+# commits — not a concern for an actively-developed repo, but if this ever
+# silently stops firing, that's why.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/health
+        run: |
+          curl -fsS --max-time 30 https://sar-oilspill-api.onrender.com/api/health
