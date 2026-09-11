@@ -45,6 +45,7 @@ RUN pip install --no-cache-dir \
 COPY src ./src
 COPY configs ./configs
 COPY scripts ./scripts
+COPY migrations ./migrations
 
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
