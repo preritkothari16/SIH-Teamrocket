@@ -290,22 +290,17 @@ done last, one step at a time — same working agreement as every other phase.
   actually renders - both via a live `uvicorn` + `npm run dev` pair driven
   with Playwright.
 
-## Phase 10 - fully switching to Postgres
+## Phase 10 - fully switching to Postgres (resolved)
 
 `src/db.py`'s `SpillRow` was columns-for-spill-and-alert-only until this
 phase; `_get_run_postgres()` (`src/api/registry.py`) returned
 `vessels: []`/`drift: {forecast: [], hindcast: []}` **unconditionally**.
-Closed before anything got called "switched":
+Closed, and the live deployment's actual 500 fixed, in the same phase:
 
 - **`migrations/001_create_spills.sql`, `migrations/002_add_vessels_and_drift.sql`**
-  (+ `migrations/README.md`) - the first tracked, idempotent record of the
-  `spills` table's shape (previously "created outside this repo,"
-  unverified from the repo alone). `002` adds `vessels_json`/`drift_json`
-  JSONB columns - plain columns on the existing table, not new normalized
-  ones, same pattern `bbox`/`rules_fired` already use. **Both applied to
-  the real, live Supabase project** (`fxvqzthhpzpdtgrhlhni`) via the
-  Supabase MCP tools available in this environment, and verified via
-  `list_tables` afterward - not just written and hoped for.
+  (+ `migrations/README.md`) - `002` adds `vessels_json`/`drift_json`
+  JSONB columns - plain columns on the existing table, same pattern
+  `bbox`/`rules_fired` already use, not new normalized tables.
 - **`src/alerts/registry.py::SpillRegistry.set_vessels_and_drift()`** -
   Postgres-only; a documented no-op on sqlite (same precedent as
   `confidence`/`bbox`/`major_axis_bearing`/`elongation`/`rules_fired`
@@ -325,41 +320,110 @@ Closed before anything got called "switched":
   there's one mapping instead of two copies that could drift apart, same
   reasoning as `src/db.py::map_alert_status` already gets its own comment
   for.
-- **`scripts/check_db_connection.py`** - run this first, before trusting
-  anything else in this phase. Connects via `src.db.get_engine()`, runs
-  `SELECT 1` + `SELECT postgis_version()`, and on failure prints the
-  Session-Pooler-vs-direct-hostname fix by name rather than a bare
-  traceback.
-- **`scripts/backfill_postgres.py`** - one-off, not wired into the normal
-  pipeline: reads `data/processed/demo_pipeline/pipeline_result.json` (the
-  one real, "real-scene verified" run in this repo) and calls
-  `register()`/`update()` + `set_vessels_and_drift()` with its actual
-  data. **Could not be run from this environment** (see below) - the
-  equivalent write was made directly against the live table via the
-  Supabase MCP tools instead, and verified byte-for-byte against what
-  `vessels_to_contract()`/`forecast_to_contract()` compute from that same
-  file, so the live table now has exactly what the script would have
-  written.
+- **`scripts/check_db_connection.py`** / **`scripts/apply_migrations.py`**
+  / **`scripts/backfill_postgres.py`** - standalone tools for exactly this
+  kind of Postgres-connectivity/migration/backfill work, independent of
+  the CLI setup below.
 
-**Connectivity, this session's own environment**: every attempt to reach
-Postgres on port 5432 - the direct `db.<ref>.supabase.co` host (DNS
-failure) and both plausible Session Pooler hostnames for this project's
-region, `aws-0-ap-south-1.pooler.supabase.com` and
-`aws-1-ap-south-1.pooler.supabase.com` (both resolved fine over IPv4, both
-timed out on the actual TCP connection) - failed. One earlier row in
-`spills` (`00000_spill_082`, from a real `run_pipeline.py` run against
-scene `00000` in an earlier turn of this same session) proves a real
-connection *did* succeed once, so this is intermittent/environment-level,
-not a settled "IPv6-only, always broken" fact - and not evidence either
-way about Render's own network. The **Supabase MCP tools available in
-this environment reach the same project over HTTPS (the management API),
-independent of this entirely** - used throughout this phase to apply
-migrations and verify/backfill data no matter what raw-TCP connectivity
-was doing at the time. `.env` was **not** changed to a guessed pooler
-string - guessing wrong would replace a "sometimes works" config with a
-"definitely unverified" one; get the exact string from the Supabase
-dashboard (Project Settings -> Database -> Connection pooling) and confirm
-it with `scripts/check_db_connection.py` from a normal network instead.
+**Migrations are now CLI-tracked** (`supabase/migrations/`, not just the
+ad-hoc `migrations/` folder, which still exists and is still what
+`scripts/apply_migrations.py`/`Dockerfile` use - two parallel paths to the
+same already-applied SQL, not a conflict). `supabase link` +
+`SUPABASE_ACCESS_TOKEN` (a personal access token, since `supabase login`
+needs a real browser/TTY this environment doesn't have) authenticates the
+CLI. The remote project's migration history had 2 entries that predate
+this repo entirely (`create_spills_table_with_postgis`,
+`enable_rls_on_spills` - confirming `src/db.py`'s own docstring) plus 3
+applied this session via the Supabase MCP tools directly (not the CLI) -
+reconciled into `supabase/migrations/` with matching timestamps via
+`supabase migration repair --status applied <version>` for each, so
+`supabase migration list` and `supabase db push --dry-run` ("Remote
+database is up to date") both agree local and remote match exactly. The 2
+pre-session files are **reconstructed** from their own names + the live
+schema (each says so in its own header) - not retrieved from an original
+source, since none exists in this repo. A third migration
+(`spills_scene_id_idx`/`spills_last_updated_idx`, the two columns
+`src/api/registry.py` actually filters/sorts by) was added after loading
+Supabase's own `supabase-postgres-best-practices` skill
+(`npx skills add supabase/agent-skills`, per that MCP server's own setup
+instructions - installed to `.agents/skills/`, the one real committed
+source; `.claude/skills/supabase*` is Windows's non-symlink materialized
+copy of it and is gitignored, not duplicated into version control) and
+auditing the existing migrations against it before they went live.
+
+**The live Render deployment's `/api/runs` 500 - root cause found and
+fixed, verified with a real headless browser against production, not just
+curl:**
+
+1. **Two Render web services existed on this account**, not one -
+   `sar-oilspill-api` (matches `render.yaml`'s own service name, and is
+   what the deployed frontend's `VITE_API_BASE_URL` actually points at)
+   and a second, separate `sih-teamrocket` service. Found via the Render
+   API's own `GET /v1/services` (the dashboard view being checked
+   apparently didn't show both) - every earlier fix in this session that
+   targeted `sih-teamrocket` never touched the one the frontend calls.
+   `WebFetch` cannot see a client-rendered SPA's true runtime state (it
+   only reads static HTML, never executes JS) - a real headless browser
+   (Playwright, already a `frontend/` devDependency) watching actual
+   `console`/`requestfinished`/`requestfailed` events is what actually
+   found this, and later confirmed the fix.
+2. `sar-oilspill-api`'s `DATABASE_URL` had the **literal placeholder text**
+   `[YOUR-PASSWORD]` never substituted - fixed, then still 500'd.
+3. Fresh Render logs (`GET /v1/logs`, timestamped to bracket a live test
+   request, not trusted stale) showed a clean `FATAL: password
+   authentication failed for user "postgres"` - the DB password itself was
+   stale/rotated at some point this session. Confirmed independently: a
+   direct `psycopg2` connection with the old password failed identically
+   once the user's own network stopped blocking port 5432 (see below), so
+   this wasn't a network artifact.
+4. User reset the Supabase DB password via the dashboard (Supabase never
+   exposes a stored password back to anyone, even the owner - only
+   resettable, never retrievable). New password verified with a direct
+   connection, then set on both the local `.env` and Render's
+   `DATABASE_URL` via the Render API, then a Render deploy triggered via
+   the API (`POST /v1/services/{id}/deploys` - an env-var `PUT` alone does
+   **not** restart the running instance; a deploy/restart must be
+   triggered separately).
+5. Verified end-to-end: `curl .../api/runs` (real data, both rows) and a
+   Playwright run against `https://sih-teamrocket.vercel.app` (zero
+   console errors, every API call 200, spill count 2 rendered) - screenshot
+   confirmed visually too.
+
+**Detour, reverted**: a Render-managed Postgres instance
+(`sar-oilspill-db`) was created as a considered alternative to Supabase
+(same private network as the web service, no cross-provider pooler
+question) - Render Jobs (the intended way to run migrations against it
+without needing raw port-5432 access) require a paid plan
+("new paid services not allowed" on this free-tier account), and this
+sandbox can't reach port 5432 on *any* host to run them manually either.
+**Abandoned per user decision - Supabase is the canonical database.**
+Created via `POST /v1/postgres`, later deleted via `DELETE
+/v1/postgres/{id}` (204), confirmed empty via `GET /v1/postgres` - nothing
+about it survives in this repo or the live deployment.
+
+**Render API key usage, for next time**: this session used a user-supplied
+Render API key (`Authorization: Bearer <key>` against `api.render.com/v1/`)
+directly - listing/inspecting services, reading/writing env vars,
+triggering deploys, pulling timestamped logs, and creating/deleting a
+Postgres instance. No official Render CLI is installed here and
+`npx render-cli` resolves to an unrelated third-party package - use the
+REST API directly instead if this comes up again. Supabase MCP tools
+(`execute_sql`, `apply_migration`, `list_tables`, `list_migrations`, etc.)
+remain the reliable path for Supabase-side work regardless of raw-TCP
+connectivity, since they go over HTTPS to Supabase's management API, not
+a direct Postgres connection.
+
+**Connectivity, this sandbox**: every attempt to reach Postgres on port
+5432 - Supabase's direct host, both Session Pooler hostnames, and the
+Render Postgres instance's external host - timed out identically, on
+every provider tried, while HTTPS (Supabase MCP, Render API, the Supabase
+CLI's own auth) worked fine throughout. The *user's own machine* hit the
+same block until they changed their network, after which the exact same
+connection strings worked immediately (confirmed: real Postgres responses,
+not timeouts) - real evidence for the IPv6 hypothesis, at least for
+whatever network they were on before. Not necessarily evidence about
+Render's own network, which was never blocked at all (it made every
+connection this whole phase needed).
 
 ## Environment facts
 
