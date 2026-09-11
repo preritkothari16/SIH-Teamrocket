@@ -238,6 +238,50 @@ def predict_tiles(
     return np.concatenate(outputs, axis=0)
 
 
+def _accumulate_tile(
+    total: np.ndarray,
+    coverage: np.ndarray,
+    patch: np.ndarray,
+    row: "pd.Series",
+    valid_mask: Optional[np.ndarray] = None,
+) -> None:
+    """Add one tile's prediction into the running full-scene accumulator, in
+    place. The shared inner-loop math both :func:`stitch_tiles` (given every
+    tile's prediction already in memory) and :func:`infer_scene`'s batched
+    path (accumulating as each batch is predicted, so the full per-tile
+    prediction list for a large scene is never held at once) build on — one
+    definition of "how a tile lands in the mosaic," not two copies to keep in
+    sync by hand.
+    """
+    patch = np.asarray(patch, dtype=np.float32)
+    row_off, col_off = int(row["row_off"]), int(row["col_off"])
+    height, width = int(row["height"]), int(row["width"])
+    patch = patch[:, :height, :width]
+
+    weight = np.ones((height, width), dtype=np.float32)
+    if valid_mask is not None:
+        weight *= np.asarray(valid_mask, dtype=np.float32)[:height, :width]
+
+    window = (slice(row_off, row_off + height), slice(col_off, col_off + width))
+    total[:, window[0], window[1]] += patch * weight
+    coverage[window] += weight
+
+
+def _finish_stitch(total: np.ndarray, coverage: np.ndarray) -> np.ndarray:
+    """Turn a filled ``total``/``coverage`` accumulator pair into averaged
+    probabilities, in place — no second ``(C, H, W)`` array allocated for the
+    division or the uncovered-pixel mask, unlike the ``np.where(...)`` this
+    replaced. Numerically identical: where coverage is 0, ``total`` is still
+    exactly 0.0 (nothing ever added to it there), so dividing by the 1e-6
+    floor gives exactly 0.0 too — the explicit mask below just makes that
+    guarantee visible rather than relying on it silently.
+    """
+    with np.errstate(invalid="ignore", divide="ignore"):
+        np.divide(total, np.maximum(coverage, 1e-6), out=total)
+        total[:, coverage <= 0] = 0.0
+    return total
+
+
 def stitch_tiles(
     probabilities: Sequence[np.ndarray],
     frame: pd.DataFrame,
@@ -260,27 +304,10 @@ def stitch_tiles(
     coverage = np.zeros(grid.shape, dtype=np.float32)
 
     for position, (_, row) in enumerate(frame.iterrows()):
-        patch = np.asarray(probabilities[position], dtype=np.float32)
-        row_off, col_off = int(row["row_off"]), int(row["col_off"])
-        height, width = int(row["height"]), int(row["width"])
-        patch = patch[:, :height, :width]
+        valid_mask = valid_masks[position] if valid_masks is not None else None
+        _accumulate_tile(total, coverage, probabilities[position], row, valid_mask)
 
-        weight = np.ones((height, width), dtype=np.float32)
-        if valid_masks is not None:
-            weight *= np.asarray(valid_masks[position], dtype=np.float32)[
-                :height, :width
-            ]
-
-        window = (
-            slice(row_off, row_off + height),
-            slice(col_off, col_off + width),
-        )
-        total[:, window[0], window[1]] += patch * weight
-        coverage[window] += weight
-
-    with np.errstate(invalid="ignore", divide="ignore"):
-        averaged = np.where(coverage > 0, total / np.maximum(coverage, 1e-6), 0.0)
-    return averaged.astype(np.float32), coverage
+    return _finish_stitch(total, coverage), coverage
 
 
 def mask_from_probabilities(
@@ -357,27 +384,63 @@ def infer_scene(
     frame = load_tile_index(scene_dir)
     grid = scene_grid_from_index(frame)
     paths = tile_paths(frame, scene_dir)
+    if not paths:
+        raise InferenceError(f"no tiles found for scene {scene_id}")
 
     if model is None:
         model = load_model(checkpoint, settings=settings)
+    if hasattr(model, "eval"):
+        model.eval()
 
     in_channels = settings.training.in_channels
-    prepared: List[np.ndarray] = []
-    valid_masks: List[np.ndarray] = []
-    for path in paths:
-        tile = read_tile(path)
-        valid_masks.append(tile_valid_mask(tile))
-        prepared.append(
-            db_to_model_input(
-                tile,
-                in_channels=in_channels,
-                db_min=cfg.input_db_min,
-                db_max=cfg.input_db_max,
-            )
-        )
 
-    probabilities = predict_tiles(model, prepared, device=device, batch_size=batch_size)
-    stitched, coverage = stitch_tiles(probabilities, frame, grid, valid_masks)
+    # Predicted and accumulated one batch_size-sized chunk at a time, rather
+    # than building a full-scene list of every tile's prepared input AND a
+    # full-scene list of every tile's prediction AND the full-scene
+    # accumulator, all resident together. That build-the-whole-list-then-
+    # stitch shape is exactly what this module's own docstring already
+    # flagged as "fine at these sizes [2048x2048 test scenes] but the thing
+    # to revisit for very large mosaics" — a real Sentinel-1 scene
+    # (~25000x17000) is that large mosaic: 2166 tiles' worth of predictions
+    # held at once alongside a multi-gigabyte accumulator does not fit in
+    # memory on a real machine, confirmed by an actual OOM running this
+    # against the two scenes in data/raw/. Chunking bounds memory to
+    # batch_size tiles + the one fixed-size accumulator, independent of how
+    # many tiles the scene has.
+    total: Optional[np.ndarray] = None
+    coverage: Optional[np.ndarray] = None
+    row_list = list(frame.iterrows())
+
+    for batch_start in range(0, len(paths), batch_size):
+        batch_paths = paths[batch_start : batch_start + batch_size]
+        batch_rows = row_list[batch_start : batch_start + batch_size]
+
+        prepared: List[np.ndarray] = []
+        valid_masks: List[np.ndarray] = []
+        for path in batch_paths:
+            tile = read_tile(path)
+            valid_masks.append(tile_valid_mask(tile))
+            prepared.append(
+                db_to_model_input(
+                    tile,
+                    in_channels=in_channels,
+                    db_min=cfg.input_db_min,
+                    db_max=cfg.input_db_max,
+                )
+            )
+
+        batch_probabilities = predict_tiles(model, prepared, device=device, batch_size=batch_size)
+
+        if total is None:
+            num_classes = int(batch_probabilities.shape[1])
+            total = np.zeros((num_classes, grid.height, grid.width), dtype=np.float32)
+            coverage = np.zeros(grid.shape, dtype=np.float32)
+
+        for position, (_, row) in enumerate(batch_rows):
+            _accumulate_tile(total, coverage, batch_probabilities[position], row, valid_masks[position])
+
+    assert total is not None and coverage is not None  # paths was non-empty, so the loop ran
+    stitched = _finish_stitch(total, coverage)
     mask = mask_from_probabilities(stitched, coverage)
 
     class_names = list(settings.training.class_names)[: stitched.shape[0]]

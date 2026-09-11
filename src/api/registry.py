@@ -349,7 +349,7 @@ def _pipeline_to_contract(
     """
     spills = data.get("spills", [])
     if not spills:
-        return _empty_contract(scene_id, data.get("generated_at", ""))
+        return _empty_contract(scene_id, data.get("generated_at", ""), data.get("scene_centroid"))
 
     target = _select_target_spill(spills)
     contract = _spill_entry_to_contract(target, scene_id)
@@ -514,14 +514,23 @@ def _geojson_to_contract(data: Dict[str, Any], scene_id: str) -> Dict[str, Any]:
     }
 
 
-def _empty_contract(scene_id: str, ts: str) -> Dict[str, Any]:
+def _empty_contract(
+    scene_id: str, ts: str, scene_centroid: Optional[Dict[str, float]] = None,
+) -> Dict[str, Any]:
+    """A processed scene with zero characterized spills still needs to be
+    shown at its own real location, not Null Island - ``scene_centroid``
+    (run_pipeline.py's own real footprint centroid, set only when the spill
+    list came back empty) takes priority over the (0, 0) fallback used when
+    it isn't available at all (the Phase 1 GeoJSON path never carries one).
+    """
+    centroid = scene_centroid or {"lat": 0.0, "lon": 0.0}
     return {
         "spill": {
             "scene_id": scene_id,
             "acquisition_timestamp": ts,
             "confidence": 0.0,
             "area_km2": 0.0,
-            "centroid": {"lat": 0.0, "lon": 0.0},
+            "centroid": centroid,
             "bbox": {"minLon": 0.0, "minLat": 0.0, "maxLon": 0.0, "maxLat": 0.0},
             "polygon": {"type": "Polygon", "coordinates": []},
             "major_axis_bearing": 0.0,

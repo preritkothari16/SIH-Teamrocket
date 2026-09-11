@@ -232,6 +232,37 @@ def run(
     print(f"      {alerted_count} of {len(spills)} spill(s) alerted")
     print(f"[4.3] drift forecast computed for {len(spills)} spill(s) (6/12/24/48h)")
 
+    # A scene where every candidate blob was rejected by the look-alike
+    # filter (or none was found at all) has zero entries in `spills` - the
+    # per-spill loop above never runs, so nothing about this scene is ever
+    # registered anywhere, Postgres included (registration only happens
+    # per-spill). That leaves a fully, honestly processed real scene with
+    # no way to show up on the dashboard at all - not "shown at the wrong
+    # place", just invisible. Fixed by registering the scene's own real
+    # footprint (never a fabricated spill shape) as a status="none" record:
+    # "this scene was processed, here is where it actually is, nothing was
+    # confirmed" - status "none" is already a valid value in both backends'
+    # existing schema, so this needs no migration.
+    scene_centroid: Optional[Dict[str, float]] = None
+    if not spills:
+        scene = run_detection.resolve_scene(scene_id, scene_path, settings)
+        centroid = scene.footprint.centroid
+        scene_centroid = {"lat": centroid.y, "lon": centroid.x}
+        if database_url(settings):
+            with SpillRegistry(path=registry_path, settings=settings) as registry:
+                registry.register(
+                    spill_id=f"{scene_id_resolved}_no_spill",
+                    geometry=scene.footprint,
+                    centroid_lon=centroid.x,
+                    centroid_lat=centroid.y,
+                    area_km2=0.0,
+                    seen_at=scene.acquisition_time,
+                    status="none",
+                    scene_id=scene_id_resolved,
+                    confidence=0.0,
+                    rules_fired=[],
+                )
+
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "scene_id": scene_id_resolved,
@@ -241,6 +272,7 @@ def run(
             detection, scene_id_resolved, spills, ais_path, ais_source_label, settings,
         ),
         "spills": results,
+        **({"scene_centroid": scene_centroid} if scene_centroid else {}),
     }
 
     processed_root = settings.paths.resolve(settings.paths.processed_dir)

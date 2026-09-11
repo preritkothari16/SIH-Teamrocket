@@ -81,6 +81,13 @@ def ingest(
                 scene_id=scene.scene_id,
                 stub_model=stub_model,
                 ais_source_label="unspecified",
+                # A scene retried after an earlier failure (e.g. the detection
+                # OOM this ingestion originally hit on a full-resolution
+                # scene) already has tile_index.parquet on disk — skip
+                # redoing preprocessing, which is the expensive part.
+                # run_detection.py only actually reuses it when that file is
+                # present, so this is a safe no-op the first time through.
+                reuse_tiles=True,
             )
         except Exception:
             failures += 1
