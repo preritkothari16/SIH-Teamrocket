@@ -159,3 +159,13 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     cited_vessels: List[str] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# Demo region presets (Step 8.4)
+# --------------------------------------------------------------------------- #
+class Region(BaseModel):
+    id: str
+    label: str
+    bbox: List[float]
+    scene_id: Optional[str] = None

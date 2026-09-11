@@ -38,6 +38,7 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 5.6 frontend | `frontend/src/` | **done** — Vite+TS SPA, cobe globe, run list, spill overlay, vessel drawer, real-scene verified |
 | 8.1 attribution Q&A | `src/attribution/qa.py`, `src/api/main.py` | **done, never called with a real key** — grounds an LLM answer in a run's existing scores/explanations, no new scoring; needs `ANTHROPIC_API_KEY`, unset here |
 | 8.2 data provenance | `scripts/run_pipeline.py`, `src/api/models.py`, `frontend/src/components/ProvenancePanel.ts` | **done** — `sar_source`/`sar_scene_id` come from data ingestion already carries; `wind_source`/`current_source` come from `get_wind()`/`get_current()`'s new `.source` field |
+| 8.4 demo regions | `configs/demo_regions.yaml`, `src/api/main.py`, `frontend/src/components/RegionChips.ts` | **done, real-scene verified** — 1 real region (`demo_pipeline`), 3 pending; header chip row, not a `<select>` |
 
 `pytest` → 496 passing, ~55-60s, fully offline. Run it before believing anything here.
 
@@ -214,6 +215,42 @@ done last, one step at a time — same working agreement as every other phase.
   `SpillOverlay.ts`) renders next to the spill overlay, sharing one
   `flex-col justify-end` bottom-right stack in `index.html` so it sits above
   the overlay regardless of the overlay's own dynamic height.
+
+- **8.4 demo regions** (`configs/demo_regions.yaml`, `GET /api/regions` +
+  `GET /api/runs?region=` in `src/api/main.py`,
+  `frontend/src/components/RegionChips.ts`): `data/raw/`/`data/ais/` are
+  empty here and `configs/aoi.geojson` is a literal placeholder — this step
+  is the *switching mechanism*, not new regional datasets, so exactly one
+  seeded region (`gulf_of_mexico`) carries a real `scene_id`
+  (`demo_pipeline`, the one committed, verified run); the other three
+  (`gujarat_coast`, `bay_of_bengal`, `mediterranean_sea`) are
+  `scene_id: null` — pending until a real local scene backs them.
+  `_load_regions()` (`src/api/main.py`) reads that YAML directly, kept as
+  its own function (not folded into the two endpoints) purely so tests can
+  monkeypatch it without touching the committed file.
+  `GET /api/runs?region=<id>` filters `list_runs()`'s output to that
+  region's `scene_id` **only** when it resolves to a non-null one — an
+  unset, unknown, or still-pending region id leaves the list unfiltered;
+  the frontend never actually sends a pending one (those chips render
+  `disabled`), so that branch is a soft no-op, not a 404. Frontend: no
+  `<select>` and no router anywhere in this app by design
+  (`frontend/src/App.ts`'s own convention — everything drives off the globe
+  + run list) — `RegionChips.ts` is a header chip row instead, same
+  `constructor(container, onSelect)`/`render(regions, selectedId)`/
+  `destroy()` shape as every other component here, wired in `App.ts` the
+  same way `setupRefreshButton()`/`setupClearButton()` are. A synthetic
+  "All" chip (not part of the API response) always clears the filter.
+  **Real-scene verified**: a live `uvicorn` + `npm run dev` pair, driven
+  with Playwright (`chromium`, no `chromium-cli` in this environment) —
+  clicking "Gulf of Mexico (Demo)" took the run list from 2 runs to the 1
+  real one, the three pending chips rendered `disabled` with a "No demo
+  data yet" tooltip and did nothing when force-clicked, "All" restored the
+  full list, zero console errors. (The local `.env`'s `DATABASE_URL` points
+  at a real Supabase instance unreachable from this sandbox — an existing,
+  documented, unrelated gap, not something this step touched; it was
+  blanked for the duration of that one manual check and restored byte-exact
+  immediately after — pytest's own `spills_dir` fixture already does the
+  same `delenv` for exactly this reason.)
 
 ## Environment facts
 

@@ -70,6 +70,13 @@ export interface DriftHindcast {
   hindcast: HindcastEntry[]
 }
 
+export interface Region {
+  id: string
+  label: string
+  bbox: number[]
+  scene_id: string | null
+}
+
 export interface Provenance {
   sar_source: string | null
   sar_scene_id: string | null

@@ -2,9 +2,10 @@ import { SpillGlobe } from './components/ui/SpillGlobe';
 import { RunList } from './components/RunList';
 import { SpillOverlay } from './components/SpillOverlay';
 import { ProvenancePanel } from './components/ProvenancePanel';
+import { RegionChips } from './components/RegionChips';
 import { VesselDrawer } from './components/VesselDrawer';
-import { listRuns, getRun, getReport } from './api/client';
-import type { PipelineRun } from './types/schema';
+import { listRuns, listRegions, getRun, getReport } from './api/client';
+import type { PipelineRun, Region } from './types/schema';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
@@ -13,8 +14,11 @@ export class App {
   private runList: RunList;
   private spillOverlay: SpillOverlay;
   private provenancePanel: ProvenancePanel;
+  private regionChips: RegionChips;
   private vesselDrawer: VesselDrawer;
   private allRuns: PipelineRun[] = [];
+  private regions: Region[] = [];
+  private selectedRegionId: string | null = null;
 
   private runListPanel: HTMLElement;
   private runListToggle: HTMLElement;
@@ -29,6 +33,7 @@ export class App {
     const runListEl = document.getElementById('run-list')!;
     const overlayEl = document.getElementById('spill-overlay')!;
     const provenanceEl = document.getElementById('provenance-panel')!;
+    const regionChipsEl = document.getElementById('region-chips')!;
     const drawerEl = document.getElementById('vessel-drawer')!;
 
     this.runListPanel = document.getElementById('run-list-panel')!;
@@ -48,6 +53,9 @@ export class App {
 
     this.spillOverlay = new SpillOverlay(overlayEl);
     this.provenancePanel = new ProvenancePanel(provenanceEl);
+    this.regionChips = new RegionChips(regionChipsEl, (regionId) => {
+      void this.onRegionSelected(regionId);
+    });
     this.vesselDrawer = new VesselDrawer(drawerEl);
 
     this.init();
@@ -60,6 +68,24 @@ export class App {
     this.setupRefreshButton();
     this.setupErrorButtons();
     this.setupReportButton();
+    void this.loadRegions();
+    await this.loadAllRuns();
+  }
+
+  private async loadRegions(): Promise<void> {
+    try {
+      this.regions = await listRegions();
+    } catch (err) {
+      // Non-fatal: the app works fine with no region switcher at all.
+      console.warn('[App] failed to load regions:', err);
+      this.regions = [];
+    }
+    this.regionChips.render(this.regions, this.selectedRegionId);
+  }
+
+  private async onRegionSelected(regionId: string | null): Promise<void> {
+    this.selectedRegionId = regionId;
+    this.regionChips.render(this.regions, this.selectedRegionId);
     await this.loadAllRuns();
   }
 
@@ -75,7 +101,7 @@ export class App {
     this.setState('loading');
 
     try {
-      const apiRuns = await listRuns();
+      const apiRuns = await listRuns(this.selectedRegionId);
       if (apiRuns.length > 0) {
         const full = await Promise.all(apiRuns.map((r) => getRun(r.scene_id)));
         this.allRuns = full;
@@ -229,6 +255,7 @@ export class App {
     this.runList.destroy();
     this.spillOverlay.destroy();
     this.provenancePanel.destroy();
+    this.regionChips.destroy();
     this.vesselDrawer.destroy();
   }
 }

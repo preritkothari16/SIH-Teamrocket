@@ -1,4 +1,4 @@
-import type { Alert, PipelineRun } from '../types/schema';
+import type { Alert, PipelineRun, Region } from '../types/schema';
 
 // Empty string keeps requests relative, routed through vite.config.ts's dev
 // proxy to localhost:8000. Set VITE_API_BASE_URL (frontend/.env) to hit a
@@ -65,14 +65,39 @@ function validatePipelineRun(data: unknown): PipelineRun {
   return data as PipelineRun;
 }
 
+function validateRegions(data: unknown): Region[] {
+  if (!Array.isArray(data)) throw new Error('Expected array from GET /api/regions');
+  return data.map((item, i) => {
+    if (typeof item !== 'object' || item === null) throw new Error(`Region[${i}] is not an object`);
+    const obj = item as Record<string, unknown>;
+    if (typeof obj.id !== 'string') throw new Error(`Region[${i}].id is not a string`);
+    if (typeof obj.label !== 'string') throw new Error(`Region[${i}].label is not a string`);
+    if (!Array.isArray(obj.bbox)) throw new Error(`Region[${i}].bbox is not an array`);
+    return {
+      id: obj.id,
+      label: obj.label,
+      bbox: obj.bbox as number[],
+      scene_id: (typeof obj.scene_id === 'string' ? obj.scene_id : null),
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Fetch helpers
 // ---------------------------------------------------------------------------
-export async function listRuns(): Promise<RunSummary[]> {
-  const res = await fetch(`${API_BASE}/api/runs`);
+export async function listRuns(region?: string | null): Promise<RunSummary[]> {
+  const query = region ? `?region=${encodeURIComponent(region)}` : '';
+  const res = await fetch(`${API_BASE}/api/runs${query}`);
   if (!res.ok) throw new Error(`GET /api/runs failed: ${res.status} ${res.statusText}`);
   const data = await res.json();
   return validateRunSummary(data.value ?? data);
+}
+
+export async function listRegions(): Promise<Region[]> {
+  const res = await fetch(`${API_BASE}/api/regions`);
+  if (!res.ok) throw new Error(`GET /api/regions failed: ${res.status} ${res.statusText}`);
+  const data = await res.json();
+  return validateRegions(data);
 }
 
 export async function getRun(sceneId: string): Promise<PipelineRun> {

@@ -7,6 +7,7 @@ GET  /api/runs/{id}         — full PipelineRun contract for one scene
 GET  /api/runs/{id}/report  — Step 5.3 report file (404 if not generated)
 POST /api/runs              — trigger detection on a scene (sync, hackathon)
 POST /api/runs/{id}/ask     — Step 8.1 natural-language Q&A over a run
+GET  /api/regions           — Step 8.4 demo region presets
 
 CORS is configured for the Vite dev server at http://localhost:5173.
 
@@ -21,13 +22,16 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
+import yaml
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from src.api.models import AskRequest, AskResponse, PipelineRun, RunRequest, RunSummary
+from src.api.models import (
+    AskRequest, AskResponse, PipelineRun, Region, RunRequest, RunSummary,
+)
 from src.api.registry import get_report_path, get_run, list_runs
 from src.attribution.qa import QAError, answer_question
 from src.config import Settings, get_settings
@@ -35,6 +39,7 @@ from src.config import Settings, get_settings
 logger = logging.getLogger(__name__)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+DEMO_REGIONS_PATH = REPO_ROOT / "configs" / "demo_regions.yaml"
 
 app = FastAPI(
     title="SAR Oil Spill API",
@@ -62,12 +67,46 @@ app.add_middleware(
 
 
 # --------------------------------------------------------------------------- #
+# Demo regions (Step 8.4) — a fixed, committed YAML file, not settings/DB
+# backed, so a separate function (not src/api/registry.py) is enough. Kept
+# as its own indirection (not inlined into the two endpoints below) purely
+# so tests can monkeypatch it without touching the real committed file.
+# --------------------------------------------------------------------------- #
+def _load_regions() -> List[Dict[str, Any]]:
+    if not DEMO_REGIONS_PATH.is_file():
+        return []
+    with DEMO_REGIONS_PATH.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+    return data.get("regions") or []
+
+
+# --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
+@app.get("/api/regions", response_model=list[Region])
+def api_list_regions() -> list[Region]:
+    """The configured demo region presets — most are pending (scene_id:
+    null) until a real local scene backs them; see configs/demo_regions.yaml."""
+    return [Region(**r) for r in _load_regions()]
+
+
 @app.get("/api/runs", response_model=list[RunSummary])
-def api_list_runs() -> list[RunSummary]:
-    """List all registered runs with summary fields."""
+def api_list_runs(region: Optional[str] = None) -> list[RunSummary]:
+    """List all registered runs with summary fields.
+
+    ``region`` (a :class:`Region`'s ``id``) filters the list down to that
+    region's own ``scene_id`` when it resolves to one; an unset, unknown, or
+    still-pending (``scene_id: null``) region leaves the list unfiltered —
+    the frontend never sends one of those (pending chips render disabled),
+    so this is a soft, best-effort filter, not a hard resource lookup.
+    """
     runs = list_runs()
+    if region:
+        target_scene_id = next(
+            (r.get("scene_id") for r in _load_regions() if r.get("id") == region), None,
+        )
+        if target_scene_id:
+            runs = [r for r in runs if r.get("scene_id") == target_scene_id]
     return [RunSummary(**r) for r in runs]
 
 

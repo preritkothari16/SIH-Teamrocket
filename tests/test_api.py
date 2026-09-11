@@ -509,3 +509,95 @@ class TestAskEndpoint:
         resp = client.post(f"/api/runs/{SCENE_ID}/ask", json={"question": "who?"})
         assert resp.status_code == 503
         assert "ANTHROPIC_API_KEY" in resp.json()["detail"]
+
+
+class TestRegionsEndpoint:
+    """Step 8.4 — GET /api/regions. Reads the real committed
+    configs/demo_regions.yaml, so this also doubles as a check that the
+    seeded file itself has the shape the acceptance criteria describe: one
+    real region (a non-null scene_id) plus pending ones."""
+
+    def test_returns_the_configured_list(self) -> None:
+        resp = client.get("/api/regions")
+        assert resp.status_code == 200
+        regions = resp.json()
+        assert len(regions) >= 1
+        for r in regions:
+            assert set(r.keys()) == {"id", "label", "bbox", "scene_id"}
+
+    def test_exactly_one_real_region_backed_by_a_committed_run(self) -> None:
+        resp = client.get("/api/regions")
+        regions = resp.json()
+        real = [r for r in regions if r["scene_id"]]
+        pending = [r for r in regions if not r["scene_id"]]
+        assert len(real) == 1
+        assert real[0]["scene_id"] == "demo_pipeline"
+        assert len(pending) >= 2
+
+
+class TestRunsRegionFilter:
+    """Step 8.4 — GET /api/runs?region=... . _load_regions() is monkeypatched
+    here rather than relying on the real demo_regions.yaml, so this test
+    doesn't drift if that file's contents ever change."""
+
+    def _write_two_scenes(self, tmp_path: Path) -> None:
+        for scene_id in ("region_scene_a", "region_scene_b"):
+            run_dir = tmp_path / "data" / "processed" / scene_id
+            run_dir.mkdir(parents=True)
+            result = {
+                "generated_at": "2024-04-10T14:30:00+00:00",
+                "scene_id": scene_id,
+                "spills": [_spill_entry(f"{scene_id}_spill_001", alerted=False, status="rejected")],
+            }
+            (run_dir / "pipeline_result.json").write_text(json.dumps(result), encoding="utf-8")
+
+    def test_region_with_a_scene_id_filters_the_list(
+        self, spills_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._write_two_scenes(tmp_path)
+        from src.api import main as main_mod
+
+        monkeypatch.setattr(
+            main_mod, "_load_regions",
+            lambda: [{"id": "region_a", "label": "Region A", "bbox": [0, 0, 1, 1],
+                      "scene_id": "region_scene_a"}],
+        )
+
+        resp = client.get("/api/runs", params={"region": "region_a"})
+        assert resp.status_code == 200
+        assert {r["scene_id"] for r in resp.json()} == {"region_scene_a"}
+
+    def test_pending_region_leaves_the_list_unfiltered(
+        self, spills_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._write_two_scenes(tmp_path)
+        from src.api import main as main_mod
+
+        monkeypatch.setattr(
+            main_mod, "_load_regions",
+            lambda: [{"id": "pending", "label": "Pending", "bbox": [0, 0, 1, 1], "scene_id": None}],
+        )
+
+        resp = client.get("/api/runs", params={"region": "pending"})
+        assert resp.status_code == 200
+        assert {r["scene_id"] for r in resp.json()} == {"region_scene_a", "region_scene_b"}
+
+    def test_unknown_region_leaves_the_list_unfiltered(
+        self, spills_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._write_two_scenes(tmp_path)
+        from src.api import main as main_mod
+
+        monkeypatch.setattr(main_mod, "_load_regions", lambda: [])
+
+        resp = client.get("/api/runs", params={"region": "no-such-region"})
+        assert resp.status_code == 200
+        assert {r["scene_id"] for r in resp.json()} == {"region_scene_a", "region_scene_b"}
+
+    def test_no_region_param_leaves_the_list_unfiltered(
+        self, spills_dir: Path, tmp_path: Path,
+    ) -> None:
+        self._write_two_scenes(tmp_path)
+        resp = client.get("/api/runs")
+        assert resp.status_code == 200
+        assert {r["scene_id"] for r in resp.json()} == {"region_scene_a", "region_scene_b"}

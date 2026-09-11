@@ -1,0 +1,29 @@
+# Demo region presets (Step 8.4) - the switching mechanism, not new regional
+# datasets. data/raw/ and data/ais/ are empty here (only .gitkeep), and
+# configs/aoi.geojson is a literal placeholder - the one real, verified run
+# in this repo is data/processed/demo_pipeline/pipeline_result.json.
+#
+# Exactly one entry below has a real scene_id; the rest are pending
+# (scene_id: null) until a real local scene backs them - the frontend
+# renders those disabled, not hidden, so the switcher's shape is visible
+# even though most of it has nothing behind it yet.
+regions:
+  - id: gulf_of_mexico
+    label: "Gulf of Mexico (Demo)"
+    bbox: [-91.0, 23.0, -88.5, 25.0]
+    scene_id: demo_pipeline
+
+  - id: gujarat_coast
+    label: "Gujarat Coast"
+    bbox: [68.0, 20.0, 72.5, 23.5]
+    scene_id: null
+
+  - id: bay_of_bengal
+    label: "Bay of Bengal"
+    bbox: [80.0, 10.0, 92.0, 22.0]
+    scene_id: null
+
+  - id: mediterranean_sea
+    label: "Mediterranean Sea"
+    bbox: [3.0, 32.0, 36.0, 42.0]
+    scene_id: null
