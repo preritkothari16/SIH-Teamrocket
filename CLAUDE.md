@@ -12,8 +12,8 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 |---|---|---|
 | 1.1 ingestion | `src/ingestion/` | **done** — CDSE catalogue + local disk source |
 | 1.2 preprocessing | `src/preprocessing/pipeline.py` | **done** — calibrate → despeckle → geocode → mask land → tile |
-| 1.3 training | `src/detection/{dataset,model,train}.py` | **done, never trained** — no GPU, no dataset here |
-| 1.4 inference + stitching | `src/detection/infer.py` | **done** — overlaps averaged, not trimmed |
+| 1.3 training | `src/detection/{dataset,model,train}.py` | **done, never trained here** — no GPU, no labelled dataset; see 1.4 for a real trained checkpoint from elsewhere |
+| 1.4 inference + stitching | `src/detection/infer.py` | **done** — overlaps averaged, not trimmed; memory-safe (memmap accumulator) for a real ~430MP scene |
 | 1.5 look-alike filter | `src/detection/lookalike_filter.py` | **done** — contrast / elongation / edge rules |
 | 1.6 characterization | `src/characterization/spill_object.py` | **done** — equal-area polygons → GeoJSON |
 | Phase 1 chain | `scripts/run_detection.py` | **done** — 1.1→1.6 for one scene |
@@ -41,7 +41,7 @@ Pipeline: ingestion → preprocessing → detection → characterization → ale
 | 8.4 demo regions | `configs/demo_regions.yaml`, `src/api/main.py`, `frontend/src/components/RegionChips.ts` | **done, real-scene verified** — 1 real region (`demo_pipeline`), 3 pending; header chip row, not a `<select>` |
 | 8.3 model card | `src/detection/train.py`, `src/api/main.py`, `frontend/src/components/ModelInfoPanel.ts` | **done, correctly reports untrained** — `models/best_metrics.json` written alongside `best.pt`; API/frontend both verified against the real (empty) `models/` and a synthetic trained payload |
 
-`pytest` → 496 passing, ~55-60s, fully offline. Run it before believing anything here.
+`pytest` → 572 passing, ~85-320s depending on machine load, fully offline. Run it before believing anything here.
 
 Phase 1 runs end to end: `scripts/run_detection.py --scene <tif> --stub-model`
 takes ~72 s on a 2048² scene. **There is still no trained checkpoint**, so
@@ -441,6 +441,109 @@ not timeouts) - real evidence for the IPv6 hypothesis, at least for
 whatever network they were on before. Not necessarily evidence about
 Render's own network, which was never blocked at all (it made every
 connection this whole phase needed).
+
+## Phase 11 - real trained detector (TideTrace), branch `feat/tidetrace-detector-integration`
+
+Step 1.3's own checkpoint has never existed (no GPU, no labelled dataset
+here). TideTrace (github.com/S-T-A-RNalin1/tidetrace) trained a real
+3-class UNet++ (`timm-efficientnet-b0`) on the Zenodo Sentinel-1 oil-spill
+corpus and publishes the checkpoint (`oil_unet_best.pt`) on Hugging Face
+Hub, no auth needed - `src/detection/tidetrace.py` is the whole
+integration: `order_bands()` (median-brightness band ordering - neither
+project's own VV/VH convention is announced anywhere) and
+`_prepare_batch_input()` (the checkpoint's own frozen dB
+mean/std normalisation) are copied verbatim from TideTrace's own
+`app/ml/{dataset,infer}.py`, not reimplemented from its README.
+`TideTraceDetector.__call__` remaps its 3-class output onto this
+project's 5-class scheme (sea/oil_spill/look_alike match; ship/land get a
+large negative logit since the checkpoint never models them) so nothing
+downstream - look-alike filter, characterization, alerts, API, frontend -
+needed to change at all. `infer.py::infer_scene()` grew one new parameter
+(`prepare_fn`) to carry TideTrace's different preprocessing through the
+existing tiling/batching/stitching path; everything else about that
+function is unchanged and still exercised by the stub model too.
+`scripts/run_detection.py`/`run_pipeline.py`/`ingest_raw_scenes.py` all
+gained a `--tidetrace-checkpoint <path>` flag (additive - omit it and
+behaviour is exactly what it always was). The real checkpoint itself
+(26.6MB) lives at `models/tidetrace_oil_unet_best.pt`, gitignored like
+every other checkpoint here - it is not committed, and a fresh clone needs
+to fetch it again via the same Hugging Face Hub download before
+`--tidetrace-checkpoint` can be used.
+
+**Validated before ever touching production**, per this session's own
+explicit gate: `scripts/compare_detectors.py` (writes nothing to
+`data/processed/`/the registry - validation only) ran stub-vs-TideTrace on
+the real `00000` scene, then on the two real full-resolution Sentinel-1
+scenes in `data/raw/` (S1B near Mauritius, S1D Strait of Malacca) - the
+stub called ~97-99% of each large real scene "oil" (its own crude
+darkest-15%-of-a-tile heuristic, meaningless at this scale); TideTrace
+found small, high-confidence, correctly-located real regions (S1B:
+0.065km²/0.96 confidence; S1D: 0.040km²/0.87 and 0.134km²/0.95) matching
+each scene's own known location. Only after that did a real production
+run (`ingest_raw_scenes.py --force --tidetrace-checkpoint`) actually
+overwrite these two scenes' processed output, confirmed live via the
+deployed API's own response (not just local inspection).
+
+Two real, pre-existing bugs found and fixed along the way (both apply
+regardless of which detector is used, not TideTrace-specific):
+
+- `infer.py`'s full-scene stitching accumulator was a plain
+  `np.zeros((C, H, W))` - ~8.5GB of anonymous RAM for a real ~430MP scene,
+  which a real OOM confirmed the machine here can't spare, especially
+  under any competing load. `_new_accumulator()` now backs anything above
+  256MB with a temp-file memmap instead (same values, same shape,
+  transparent to every caller) so the OS can reclaim it under pressure
+  instead of hard-killing the process. `stitch_backscatter()` also used to
+  read every tile into a Python list before stitching (another few GB for
+  a real scene) - now streams one tile at a time, same pattern
+  `infer_scene()`'s own batching already used.
+- A real, characterized spill that fails the alert manager's
+  confidence/area gate (`evaluate_alert()`, `src/alerts/manager.py`) was
+  **never written to the registry at all** - only an alerted spill, or a
+  scene with zero characterized spills (the Phase 10 zero-spill fix),
+  ever got a Postgres row. A real small detection is exactly this case:
+  found, correctly rejected as too small to alert on, and invisible on
+  the dashboard regardless. `run_pipeline.py` now also registers the
+  strongest real candidate (never the scene's generic footprint) when
+  every spill in a scene was rejected pre-registration.
+- Scene/spill centroids were averaged as raw lon/lat degrees
+  (`geometry.centroid` on a WGS84 polygon) - geopandas itself warns this
+  is "likely incorrect" for a geographic CRS. Negligible for one small
+  spill polygon, real and visible for a full satellite swath footprint.
+  `geographic_centroid()` (`src/characterization/spill_object.py`)
+  reprojects to the equal-area CRS this module already uses for area
+  before averaging, then back to WGS84 - same `is_geographic` guard
+  `area_km2`/`perimeter_km` already have for an already-projected input.
+
+**A sharper edge case surfaced fixing the above, not yet fully closed**:
+the Phase 10 zero-spill placeholder registers a scene's *entire footprint*
+as a `status="none"` row when characterization finds nothing. That
+footprint is huge - large enough that `dedup_rule()` (a real detection
+anywhere inside it counts as "overlapping") treats *any later, better
+detector's real find in that same scene* as the same event, and merges it
+into the placeholder via `registry.update()` rather than registering it
+fresh. `update()` does not thread `confidence` through on this path
+either, so the merged row keeps the placeholder's old (0.0) confidence
+even though its geometry/area/status get overwritten with the real
+values. Worked around for S1D by deleting the stale placeholder before
+registering fresh (same one-off fix S1B's own stale stub-era row got) -
+not yet fixed at the design level. The real fix is one of: never use a
+whole scene's own footprint as a *dedup-eligible* event (dedup should
+only ever match one real detection against another), or thread
+`confidence` through `evaluate_alert()`'s dedup-update call. Whoever picks
+this thread up next: check `src/alerts/manager.py::evaluate_alert()`'s
+dedup branch and `dedup_rule()` in the same file first.
+
+**Still open as of this commit**: S1D's real spill_002 (0.134km²/0.95
+confidence, above) is computed and sitting in
+`data/processed/spills/S1D_..._8374_0887.geojson` and the mask itself is
+already on disk (`data/processed/S1D_.../..._mask.tif`) - the 43-minute
+inference never needs rerunning - but the actual Postgres write for it
+hit repeated "Modify Shared Resources" permission denials mid-session and
+was never completed. `scripts/_resume_s1d.py` (one-off, not part of the
+normal pipeline, safe to delete once this is done) finishes it in seconds
+from the already-computed mask - just needs to actually run with DB write
+permission granted. S1B's own equivalent was completed and is live.
 
 ## Environment facts
 
