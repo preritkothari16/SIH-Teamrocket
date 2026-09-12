@@ -39,8 +39,11 @@ against that path and is exercised in tests with a stub model::
 from __future__ import annotations
 
 import argparse
+import atexit
 import logging
+import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
@@ -238,6 +241,38 @@ def predict_tiles(
     return np.concatenate(outputs, axis=0)
 
 
+#: Above this many bytes, a full-scene accumulator is backed by a temp file
+#: (memmap) instead of anonymous RAM. A real Sentinel-1 scene's (C, H, W)
+#: accumulator is several GB - anonymous memory that size can't be paged
+#: out under pressure and triggers a hard OOM kill; a file-backed mapping
+#: lets the OS reclaim clean pages instead. Small (e.g. synthetic test)
+#: scenes stay plain ``np.zeros`` - no filesystem I/O for the common case.
+_MEMMAP_THRESHOLD_BYTES = 256 * 1024 * 1024
+
+
+def _new_accumulator(shape: Tuple[int, ...], dtype: Any = np.float32) -> np.ndarray:
+    """Zero-filled array for a stitching accumulator - file-backed for a
+    real full-scene mosaic, in-RAM for anything small (tests, small scenes).
+    """
+    nbytes = int(np.prod(shape)) * np.dtype(dtype).itemsize
+    if nbytes < _MEMMAP_THRESHOLD_BYTES:
+        return np.zeros(shape, dtype=dtype)
+
+    fd, path = tempfile.mkstemp(prefix="sar_accum_", suffix=".dat")
+    os.close(fd)
+
+    def _cleanup(target: str = path) -> None:
+        try:
+            os.remove(target)
+        except OSError:
+            pass
+
+    atexit.register(_cleanup)  # runs at process exit, after the mmap is closed
+    array = np.memmap(path, dtype=dtype, mode="w+", shape=shape)
+    array[:] = 0
+    return array
+
+
 def _accumulate_tile(
     total: np.ndarray,
     coverage: np.ndarray,
@@ -300,8 +335,8 @@ def stitch_tiles(
         )
 
     num_classes = int(np.asarray(probabilities[0]).shape[0])
-    total = np.zeros((num_classes, grid.height, grid.width), dtype=np.float32)
-    coverage = np.zeros(grid.shape, dtype=np.float32)
+    total = _new_accumulator((num_classes, grid.height, grid.width), np.float32)
+    coverage = _new_accumulator(grid.shape, np.float32)
 
     for position, (_, row) in enumerate(frame.iterrows()):
         valid_mask = valid_masks[position] if valid_masks is not None else None
@@ -340,6 +375,11 @@ def stitch_backscatter(
     entirely land/nodata there - come back as NaN, not zero: a fabricated 0 dB
     fill would let land silently pollute the look-alike filter's contrast ring
     around a coastal blob.
+
+    Reads and accumulates one tile at a time (same reasoning as
+    :func:`infer_scene`'s own batching) rather than building a full list of
+    every tile's raw pixels first - on a real Sentinel-1 scene (~2000+
+    tiles) that list alone is several GB, on top of the accumulator itself.
     """
     scene_dir = Path(scene_dir)
     if frame is None:
@@ -348,10 +388,18 @@ def stitch_backscatter(
         grid = scene_grid_from_index(frame)
 
     paths = tile_paths(frame, scene_dir)
-    tiles = [read_tile(path) for path in paths]
-    valid_masks = [tile_valid_mask(t) for t in tiles]
+    total: Optional[np.ndarray] = None
+    coverage: Optional[np.ndarray] = None
 
-    stitched, coverage = stitch_tiles(tiles, frame, grid, valid_masks)
+    for path, (_, row) in zip(paths, frame.iterrows()):
+        tile = read_tile(path)
+        if total is None:
+            total = _new_accumulator((tile.shape[0], grid.height, grid.width), np.float32)
+            coverage = _new_accumulator(grid.shape, np.float32)
+        _accumulate_tile(total, coverage, tile, row, tile_valid_mask(tile))
+
+    assert total is not None and coverage is not None  # paths was non-empty
+    stitched = _finish_stitch(total, coverage)
     return np.where(coverage > 0, stitched, np.float32(np.nan)).astype(np.float32)
 
 
@@ -368,8 +416,17 @@ def infer_scene(
     output_path: Optional[Path] = None,
     save: bool = True,
     settings: Optional[Settings] = None,
+    prepare_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
 ) -> InferenceResult:
     """Predict over every tile of a preprocessed scene and stitch the result.
+
+    ``prepare_fn`` overrides how a raw ``(bands, H, W)`` dB tile becomes a
+    model input — same role and signature as :func:`db_to_model_input`
+    (the default), for a detector trained on different preprocessing (e.g.
+    :mod:`src.detection.tidetrace`, which normalises directly in dB space
+    rather than remapping to 0-255). Everything else about this function —
+    tiling, batching, memory-safe accumulation, stitching, the returned
+    ``InferenceResult`` shape — is preprocessing-independent and unchanged.
 
     Pass ``model`` to use an already-loaded network (or a stub, in tests);
     otherwise a checkpoint is loaded from ``checkpoint`` or
@@ -420,21 +477,24 @@ def infer_scene(
         for path in batch_paths:
             tile = read_tile(path)
             valid_masks.append(tile_valid_mask(tile))
-            prepared.append(
-                db_to_model_input(
-                    tile,
-                    in_channels=in_channels,
-                    db_min=cfg.input_db_min,
-                    db_max=cfg.input_db_max,
+            if prepare_fn is not None:
+                prepared.append(prepare_fn(tile))
+            else:
+                prepared.append(
+                    db_to_model_input(
+                        tile,
+                        in_channels=in_channels,
+                        db_min=cfg.input_db_min,
+                        db_max=cfg.input_db_max,
+                    )
                 )
-            )
 
         batch_probabilities = predict_tiles(model, prepared, device=device, batch_size=batch_size)
 
         if total is None:
             num_classes = int(batch_probabilities.shape[1])
-            total = np.zeros((num_classes, grid.height, grid.width), dtype=np.float32)
-            coverage = np.zeros(grid.shape, dtype=np.float32)
+            total = _new_accumulator((num_classes, grid.height, grid.width), np.float32)
+            coverage = _new_accumulator(grid.shape, np.float32)
 
         for position, (_, row) in enumerate(batch_rows):
             _accumulate_tile(total, coverage, batch_probabilities[position], row, valid_masks[position])

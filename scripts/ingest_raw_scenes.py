@@ -44,6 +44,8 @@ def ingest(
     scene_ids: Optional[List[str]] = None,
     force: bool = False,
     stub_model: bool = True,
+    tidetrace_checkpoint: Optional[Path] = None,
+    batch_size: Optional[int] = None,
 ) -> int:
     """Process every discovered (or explicitly named) scene. Returns the
     number of scenes that failed, so a caller/CI can treat a nonzero count
@@ -80,6 +82,8 @@ def ingest(
             run_pipeline(
                 scene_id=scene.scene_id,
                 stub_model=stub_model,
+                tidetrace_checkpoint=tidetrace_checkpoint,
+                batch_size=batch_size,
                 ais_source_label="unspecified",
                 # A scene retried after an earlier failure (e.g. the detection
                 # OOM this ingestion originally hit on a full-resolution
@@ -110,6 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-stub-model", dest="stub_model", action="store_false",
                         help="use a real trained checkpoint instead of the stub — "
                              "only meaningful once models/best.pt actually exists")
+    parser.add_argument("--tidetrace-checkpoint", type=Path, default=None,
+                        help="use TideTrace's real trained UNet++ (oil_unet_best.pt) "
+                             "instead of the stub — takes priority over --stub-model")
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="inference batch size; defaults to detection.batch_size")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -120,7 +129,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    failures = ingest(scene_ids=args.scene_ids, force=args.force, stub_model=args.stub_model)
+    stub_model = args.stub_model and not args.tidetrace_checkpoint
+    failures = ingest(
+        scene_ids=args.scene_ids, force=args.force, stub_model=stub_model,
+        tidetrace_checkpoint=args.tidetrace_checkpoint, batch_size=args.batch_size,
+    )
     return 1 if failures else 0
 
 

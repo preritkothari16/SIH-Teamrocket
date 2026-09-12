@@ -118,9 +118,11 @@ def run(
     scene_path: Optional[Path] = None,
     checkpoint: Optional[Path] = None,
     stub_model: bool = False,
+    tidetrace_checkpoint: Optional[Path] = None,
     output: Optional[Path] = None,
     tile_size: Optional[int] = None,
     overlap: Optional[int] = None,
+    batch_size: Optional[int] = None,
     reuse_tiles: bool = False,
     settings: Optional[Settings] = None,
 ) -> Dict[str, Any]:
@@ -143,14 +145,34 @@ def run(
         )
         print(f"[1.2] {len(preprocessed.tiles)} tile(s) -> {scene_dir}")
 
+    # Selection order: an explicit --stub-model always wins (it's an
+    # explicit request for the threshold stand-in, never a silent
+    # fallback); then an explicit --tidetrace-checkpoint; otherwise the
+    # existing behaviour, completely unchanged — this project's own
+    # checkpoint format, which has never actually existed (no GPU, no
+    # labelled dataset here), so this branch still fails exactly as
+    # loudly as it always has when neither flag is given.
+    prepare_fn = None
     if stub_model:
         print("[1.4] STUB MODEL: dark pixels called oil. This is not a detector.")
         model = ThresholdStubModel(num_classes=settings.training.num_classes)
+    elif tidetrace_checkpoint:
+        from src.detection.tidetrace import load_tidetrace_model
+
+        print(f"[1.4] TIDETRACE UNET++: loading {tidetrace_checkpoint}")
+        detector = load_tidetrace_model(Path(tidetrace_checkpoint))
+        print(
+            f"      arch={detector.net.__class__.__name__} "
+            f"normalisation={detector.normalisation}"
+        )
+        model = detector
+        prepare_fn = detector.prepare
     else:
         model = load_model(checkpoint, settings=settings)
 
     result = infer_scene(
-        scene_dir, model=model, scene_id=scene.scene_id, settings=settings
+        scene_dir, model=model, scene_id=scene.scene_id, settings=settings,
+        prepare_fn=prepare_fn, batch_size=batch_size,
     )
     covered = result.mask != NODATA_CLASS
     print(
@@ -220,9 +242,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--stub-model", action="store_true",
                         help="threshold stand-in, for wiring checks before training")
+    parser.add_argument("--tidetrace-checkpoint", type=Path, default=None,
+                        help="path to TideTrace's oil_unet_best.pt (real trained "
+                             "UNet++ detector) - see src/detection/tidetrace.py")
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--tile-size", type=int, default=None)
     parser.add_argument("--overlap", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="inference batch size; defaults to detection.batch_size")
     parser.add_argument("--reuse-tiles", action="store_true",
                         help="skip preprocessing if this scene is already tiled")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -240,9 +267,11 @@ def main(argv: Optional[list] = None) -> int:
         scene_path=args.scene_path,
         checkpoint=args.checkpoint,
         stub_model=args.stub_model,
+        tidetrace_checkpoint=args.tidetrace_checkpoint,
         output=args.output,
         tile_size=args.tile_size,
         overlap=args.overlap,
+        batch_size=args.batch_size,
         reuse_tiles=args.reuse_tiles,
     )
     return 0

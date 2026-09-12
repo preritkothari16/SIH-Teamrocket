@@ -22,6 +22,7 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import geopandas as gpd
 import numpy as np
 from affine import Affine
 from pyproj import CRS as ProjCRS
@@ -29,7 +30,7 @@ from pyproj import Transformer
 from rasterio.features import shapes as raster_shapes
 from rasterio.windows import Window
 from rasterio.windows import transform as window_transform
-from shapely.geometry import MultiPolygon, Polygon, mapping, shape
+from shapely.geometry import MultiPolygon, Point, Polygon, mapping, shape
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform as shapely_transform
 
@@ -67,6 +68,30 @@ def to_equal_area(
     )
     transformer = Transformer.from_crs(source_crs, target, always_xy=True)
     return shapely_transform(transformer.transform, geometry), target
+
+
+def geographic_centroid(geometry: BaseGeometry, source_crs: str = WGS84) -> Point:
+    """The geometry's true centroid, reprojected to an equal-area CRS before
+    averaging rather than averaging raw lon/lat degrees.
+
+    ``geometry.centroid`` on a WGS84 polygon treats degrees as a flat plane -
+    geopandas itself warns this is "likely incorrect" for exactly this
+    reason. The error is negligible for a single small slick (which is why
+    the rest of this module's own per-feature equal-area CRS was judged fine
+    there - see the module docstring), but real and visible for a large,
+    skewed shape like a full satellite swath footprint, where the naive
+    average can land noticeably off the geometry's true visual centre.
+
+    A geometry already in a projected (metric) CRS needs none of this - its
+    coordinates are already flat-plane-correct - so it's returned as-is,
+    same guard :func:`area_km2`/:func:`perimeter_km` already use.
+    """
+    if not ProjCRS.from_user_input(source_crs).is_geographic:
+        return geometry.centroid
+    target = equal_area_crs_for(geometry)
+    projected = gpd.GeoSeries([geometry], crs=source_crs).to_crs(target)
+    back = gpd.GeoSeries([projected.iloc[0].centroid], crs=target).to_crs(source_crs)
+    return back.iloc[0]
 
 
 def area_km2(geometry: BaseGeometry, source_crs: str = WGS84) -> float:
@@ -224,7 +249,7 @@ def build_spill_object(
     """
     settings = settings or get_settings()
 
-    centroid = geometry.centroid
+    centroid = geographic_centroid(geometry, crs)
     west, south, east, north = geometry.bounds
     orientation, elongation, major_km, minor_km = orientation_and_elongation(geometry, crs)
     spill_area = area_km2(geometry, crs)
@@ -396,4 +421,5 @@ __all__ = [
     "orientation_and_elongation",
     "equal_area_crs_for",
     "to_equal_area",
+    "geographic_centroid",
 ]

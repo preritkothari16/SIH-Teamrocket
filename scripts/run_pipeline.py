@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from shapely.geometry import mapping
+from shapely.geometry import mapping, shape
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:  # allow `python scripts/run_pipeline.py`
@@ -41,6 +41,7 @@ from src.ais.loader import load_ais  # noqa: E402
 from src.alerts.manager import process_spill  # noqa: E402
 from src.alerts.registry import SpillRegistry  # noqa: E402
 from src.api.registry import forecast_to_contract, vessels_to_contract  # noqa: E402
+from src.characterization.spill_object import geographic_centroid  # noqa: E402
 from src.config import Settings, get_settings  # noqa: E402
 from src.db import database_url  # noqa: E402
 from src.drift.forward import forecast_drift  # noqa: E402
@@ -118,10 +119,12 @@ def run(
     scene_path: Optional[Path] = None,
     checkpoint: Optional[Path] = None,
     stub_model: bool = False,
+    tidetrace_checkpoint: Optional[Path] = None,
     ais_path: Optional[Path] = None,
     ais_source_label: str = "unspecified",
     tile_size: Optional[int] = None,
     overlap: Optional[int] = None,
+    batch_size: Optional[int] = None,
     reuse_tiles: bool = False,
     output: Optional[Path] = None,
     write_map: bool = False,
@@ -163,7 +166,8 @@ def run(
 
     detection = run_detection.run(
         scene_id=scene_id, scene_path=scene_path, checkpoint=checkpoint,
-        stub_model=stub_model, tile_size=tile_size, overlap=overlap,
+        stub_model=stub_model, tidetrace_checkpoint=tidetrace_checkpoint,
+        tile_size=tile_size, overlap=overlap, batch_size=batch_size,
         reuse_tiles=reuse_tiles, settings=settings,
     )
     spills = detection.get("features", [])
@@ -238,30 +242,89 @@ def run(
     # registered anywhere, Postgres included (registration only happens
     # per-spill). That leaves a fully, honestly processed real scene with
     # no way to show up on the dashboard at all - not "shown at the wrong
-    # place", just invisible. Fixed by registering the scene's own real
-    # footprint (never a fabricated spill shape) as a status="none" record:
-    # "this scene was processed, here is where it actually is, nothing was
-    # confirmed" - status "none" is already a valid value in both backends'
-    # existing schema, so this needs no migration.
+    # place", just invisible. The same blind spot exists one level deeper:
+    # `evaluate_alert()` returns `spill_id=None` (never calling
+    # `registry.register()`) for *any* spill that fails the confidence or
+    # area gate before ever reaching registration - a real, characterized
+    # spill that is simply too small/low-confidence to alert on is just as
+    # invisible in Postgres as a scene with none at all, even though
+    # `spills` itself is non-empty. Both cases are fixed the same way:
+    # register the best real evidence this scene actually has (never a
+    # fabricated shape) as a status="none"/"rejected" record - "this scene
+    # was processed, here is what was actually found, nothing was
+    # confirmed" - rather than leaving a stale earlier run's row as the
+    # only thing anyone ever sees.
     scene_centroid: Optional[Dict[str, float]] = None
-    if not spills:
-        scene = run_detection.resolve_scene(scene_id, scene_path, settings)
-        centroid = scene.footprint.centroid
-        scene_centroid = {"lat": centroid.y, "lon": centroid.x}
+    any_registered = any(r["alert"].get("spill_id") for r in results)
+    if not any_registered:
+        if not spills:
+            scene = run_detection.resolve_scene(scene_id, scene_path, settings)
+            # A satellite swath footprint is a large, skewed shape - averaging
+            # its raw lon/lat degrees (geometry.centroid) lands measurably off
+            # its true centre, unlike a single small spill polygon where that
+            # error is negligible. geographic_centroid() reprojects to an
+            # equal-area CRS first, same approach this pipeline already uses
+            # for area.
+            centroid = geographic_centroid(scene.footprint)
+            scene_centroid = {"lat": centroid.y, "lon": centroid.x}
+            placeholder_geometry = scene.footprint
+            placeholder_status = "none"
+            placeholder_confidence = 0.0
+            placeholder_area = 0.0
+            placeholder_seen_at = scene.acquisition_time
+            placeholder_id = f"{scene_id_resolved}_no_spill"
+        else:
+            # Real spill(s) exist but every one was rejected pre-registration
+            # (too small or too low-confidence to alert on) - show the
+            # strongest real candidate rather than the scene's generic
+            # footprint, since it is more informative and equally true.
+            best = max(
+                spills,
+                key=lambda f: (f.get("properties") or {}).get("mean_confidence") or 0.0,
+            )
+            best_props = best.get("properties") or {}
+            best_geometry = shape(best["geometry"])
+            centroid = geographic_centroid(best_geometry)
+            scene_centroid = {"lat": centroid.y, "lon": centroid.x}
+            placeholder_geometry = best_geometry
+            placeholder_status = "rejected"
+            placeholder_confidence = float(best_props.get("mean_confidence") or 0.0)
+            placeholder_area = float(best_props.get("area_km2") or 0.0)
+            best_timestamp = best_props.get("acquisition_timestamp")
+            placeholder_seen_at = (
+                datetime.fromisoformat(best_timestamp) if best_timestamp
+                else datetime.now(timezone.utc)
+            )
+            # best_props["spill_id"] already carries the scene_id prefix
+            # (build_spill_object's own default), so use it as-is rather
+            # than doubling the prefix.
+            placeholder_id = best_props.get("spill_id") or f"{scene_id_resolved}_best_candidate"
+
         if database_url(settings):
             with SpillRegistry(path=registry_path, settings=settings) as registry:
-                registry.register(
-                    spill_id=f"{scene_id_resolved}_no_spill",
-                    geometry=scene.footprint,
+                # A --force re-run of an already-processed scene hits this
+                # same placeholder id again - register() raises on a
+                # duplicate, so an existing row is updated in place instead
+                # (same "seen before -> update" pattern evaluate_alert's own
+                # dedup step already uses).
+                placeholder_kwargs = dict(
+                    geometry=placeholder_geometry,
                     centroid_lon=centroid.x,
                     centroid_lat=centroid.y,
-                    area_km2=0.0,
-                    seen_at=scene.acquisition_time,
-                    status="none",
+                    area_km2=placeholder_area,
+                    seen_at=placeholder_seen_at,
+                    status=placeholder_status,
                     scene_id=scene_id_resolved,
-                    confidence=0.0,
-                    rules_fired=[],
                 )
+                if registry.get(placeholder_id) is not None:
+                    registry.update(placeholder_id, **placeholder_kwargs)
+                else:
+                    registry.register(
+                        spill_id=placeholder_id,
+                        confidence=placeholder_confidence,
+                        rules_fired=[],
+                        **placeholder_kwargs,
+                    )
 
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -313,6 +376,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--stub-model", action="store_true",
                         help="threshold stand-in, for wiring checks before training")
+    parser.add_argument("--tidetrace-checkpoint", type=Path, default=None,
+                        help="path to TideTrace's oil_unet_best.pt (real trained "
+                             "UNet++ detector) - see src/detection/tidetrace.py")
     parser.add_argument("--ais", dest="ais_path", type=Path, default=None,
                         help="AIS export (.csv or .parquet); omit to skip attribution")
     parser.add_argument("--ais-source-label", type=str, default="unspecified",
@@ -320,6 +386,8 @@ def build_parser() -> argparse.ArgumentParser:
                              "Office for Coastal Management historical AIS')")
     parser.add_argument("--tile-size", type=int, default=None)
     parser.add_argument("--overlap", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="inference batch size; defaults to detection.batch_size")
     parser.add_argument("--reuse-tiles", action="store_true",
                         help="skip preprocessing if this scene is already tiled")
     parser.add_argument("--output", type=Path, default=None)
@@ -346,10 +414,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         scene_path=args.scene_path,
         checkpoint=args.checkpoint,
         stub_model=args.stub_model,
+        tidetrace_checkpoint=args.tidetrace_checkpoint,
         ais_path=args.ais_path,
         ais_source_label=args.ais_source_label,
         tile_size=args.tile_size,
         overlap=args.overlap,
+        batch_size=args.batch_size,
         reuse_tiles=args.reuse_tiles,
         output=args.output,
         write_map=args.write_map,
